@@ -19,6 +19,13 @@ type ImageRenderer struct {
 	char   string
 }
 
+func rgbTo256(r, g, b uint8) int {
+	r6 := int(float64(r) * 5 / 255)
+	g6 := int(float64(g) * 5 / 255)
+	b6 := int(float64(b) * 5 / 255)
+	return 16 + 36*r6 + 6*g6 + b6
+}
+
 func (r *ImageRenderer) getBlockArtLines(img image.Image) []string {
 	resized := imaging.Resize(img, r.width, r.height*2, imaging.Lanczos)
 	bounds := resized.Bounds()
@@ -58,6 +65,16 @@ func (r *ImageRenderer) getBlockArtLines(img image.Image) []string {
 				tChar := asciiChars[int(tGray/255*float64(len(asciiChars)-1))]
 				bChar := asciiChars[int(bGray/255*float64(len(asciiChars)-1))]
 				line += fmt.Sprintf("%c%c", tChar, bChar)
+			case "256":
+				line += fmt.Sprintf("\033[38;5;%d;48;5;%dm▀", rgbTo256(tr8, tg8, tb8), rgbTo256(br8, bg8, bb8))
+			case "invert":
+				// Invert colors if needed
+				tr8, tg8, tb8 = 255-tr8, 255-tg8, 255-tb8
+				br8, bg8, bb8 = 255-br8, 255-bg8, 255-bb8
+
+				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s",
+					tr8, tg8, tb8, br8, bg8, bb8, r.char)
+				line += "\033[0m"
 			default: // "rgb"
 				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s", tr8, tg8, tb8, br8, bg8, bb8, r.char)
 			}
