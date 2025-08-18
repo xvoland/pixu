@@ -48,20 +48,19 @@ func (r *ImageRenderer) getBlockArtLines(img image.Image) []string {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Использование: go run main.go <путь к изображению> [--width=<число>] [--height=<число>]")
+		fmt.Println("Usage: go run main.go <image_path> [--width=<number>] [--height=<number>]")
 		return
 	}
 
 	imgPath := os.Args[1]
 
-	// Флаги начинаем парсить со второго аргумента
-	widthPtr := flag.Int("width", 0, "Ширина изображения в символах")
-	heightPtr := flag.Int("height", 0, "Высота изображения в полублоках")
+	widthPtr := flag.Int("width", 0, "Image width in characters")
+	heightPtr := flag.Int("height", 0, "Image height in half-blocks")
 	flag.CommandLine.Parse(os.Args[2:])
 
 	img, err := imaging.Open(imgPath)
 	if err != nil {
-		log.Fatalf("Ошибка загрузки изображения: %v", err)
+		log.Fatalf("Error loading image: %v", err)
 	}
 
 	imgWidth := img.Bounds().Dx()
@@ -70,17 +69,21 @@ func main() {
 	scaleWidth := *widthPtr
 	scaleHeight := *heightPtr
 
-	// Если оба нуля, ставим стандартные значения
+	// Default values if both are zero
 	if scaleWidth == 0 && scaleHeight == 0 {
 		scaleWidth = 40
 		scaleHeight = 20
+		fmt.Printf("Recommended size for the image: --width=%d --height=%d\n",
+			scaleWidth, scaleHeight)
 	}
 
-	// Авторасчёт пропорций
+	// Automatic aspect ratio calculation
 	if scaleWidth > 0 && scaleHeight == 0 {
 		scaleHeight = int(math.Round(float64(imgHeight) * float64(scaleWidth) / float64(imgWidth) / 2))
+		fmt.Printf("Hint: for width=%d, recommended height=%d\n", scaleWidth, scaleHeight)
 	} else if scaleHeight > 0 && scaleWidth == 0 {
 		scaleWidth = int(math.Round(float64(imgWidth) * float64(scaleHeight*2) / float64(imgHeight)))
+		fmt.Printf("Hint: for height=%d, recommended width=%d\n", scaleHeight, scaleWidth)
 	}
 
 	renderer := &ImageRenderer{
