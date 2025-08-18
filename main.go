@@ -31,6 +31,10 @@ func (r *ImageRenderer) getBlockArtLines(img image.Image) []string {
 	bounds := resized.Bounds()
 
 	lines := make([]string, 0, bounds.Dy()/2)
+	asciiChars := "@#%*+=-:. "
+	if r.mode == "ascii" && r.char != "" {
+		asciiChars = r.char // use user-defined ASCII characters
+	}
 
 	for y := bounds.Min.Y; y < bounds.Max.Y; y += 2 {
 		line := ""
@@ -53,11 +57,15 @@ func (r *ImageRenderer) getBlockArtLines(img image.Image) []string {
 			}
 
 			switch r.mode {
-			case "grayscale":
-				tGray := uint8(0.299*float64(tr8) + 0.587*float64(tg8) + 0.114*float64(tb8))
-				bGray := uint8(0.299*float64(br8) + 0.587*float64(bg8) + 0.114*float64(bb8))
-				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s", tGray, tGray, tGray, bGray, bGray, bGray, r.char)
 			case "ascii":
+				// Convert user-provided string to rune slice for proper indexing
+				asciiRunes := []rune(asciiChars)
+				grayTop := 0.299*float64(tr8) + 0.587*float64(tg8) + 0.114*float64(tb8)
+				grayBottom := 0.299*float64(br8) + 0.587*float64(bg8) + 0.114*float64(bb8)
+				avgGray := (grayTop + grayBottom) / 2
+				index := int(avgGray / 255 * float64(len(asciiRunes)-1))
+				line += string(asciiRunes[index])
+			case "asc2":
 				// Simple grayscale to ascii mapping
 				asciiChars := "@#%*+=-:. "
 				tGray := 0.299*float64(tr8) + 0.587*float64(tg8) + 0.114*float64(tb8)
@@ -67,19 +75,18 @@ func (r *ImageRenderer) getBlockArtLines(img image.Image) []string {
 				line += fmt.Sprintf("%c%c", tChar, bChar)
 			case "256":
 				line += fmt.Sprintf("\033[38;5;%d;48;5;%dm▀", rgbTo256(tr8, tg8, tb8), rgbTo256(br8, bg8, bb8))
-			case "invert":
-				// Invert colors if needed
-				tr8, tg8, tb8 = 255-tr8, 255-tg8, 255-tb8
-				br8, bg8, bb8 = 255-br8, 255-bg8, 255-bb8
-
-				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s",
-					tr8, tg8, tb8, br8, bg8, bb8, r.char)
-				line += "\033[0m"
-			default: // "rgb"
+			case "grayscale":
+				grayTop := uint8(0.299*float64(tr8) + 0.587*float64(tg8) + 0.114*float64(tb8))
+				grayBottom := uint8(0.299*float64(br8) + 0.587*float64(bg8) + 0.114*float64(bb8))
+				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s", grayTop, grayTop, grayTop, grayBottom, grayBottom, grayBottom, r.char)
+			default: // rgb
 				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s", tr8, tg8, tb8, br8, bg8, bb8, r.char)
 			}
 		}
-		line += "\033[0m"
+
+		if r.mode != "ascii" {
+			line += "\033[0m"
+		}
 		lines = append(lines, line)
 	}
 
