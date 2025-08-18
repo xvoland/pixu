@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"image"
 	"image/color"
@@ -39,7 +40,6 @@ func (r *ImageRenderer) getBlockArtLines(img image.Image) []string {
 			tr, tg, tb, _ := topColor.RGBA()
 			br, bg, bb, _ := bottomColor.RGBA()
 
-			// Конвертируем в 8-бит
 			tr8, tg8, tb8 := uint8(tr>>8), uint8(tg>>8), uint8(tb>>8)
 			br8, bg8, bb8 := uint8(br>>8), uint8(bg>>8), uint8(bb>>8)
 
@@ -55,37 +55,54 @@ func (r *ImageRenderer) getBlockArtLines(img image.Image) []string {
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Println("Использование: go run main.go <путь к изображению>")
+	widthPtr := flag.Int("width", 0, "Ширина изображения в символах")
+	heightPtr := flag.Int("height", 0, "Высота изображения в половинных блоках")
+	flag.Parse()
+
+	if flag.NArg() < 1 {
+		fmt.Println("Использование: go run main.go <путь к изображению> [--width=<число>] [--height=<число>]")
 		return
 	}
 
-	imgPath := os.Args[1]
+	imgPath := flag.Arg(0)
 
 	img, err := imaging.Open(imgPath)
 	if err != nil {
 		log.Fatalf("Ошибка загрузки изображения: %v", err)
 	}
 
-	// Размер терминала
 	termWidth, termHeight, err := term.GetSize(int(os.Stdout.Fd()))
 	if err != nil {
 		termWidth, termHeight = 80, 40
 	}
 
-	maxWidthBlocks := termWidth
-	maxHeightBlocks := int(float64(termHeight) * 2) // *2 для полублоков
-
 	imgWidth := img.Bounds().Dx()
 	imgHeight := img.Bounds().Dy()
 
-	// Пропорциональное масштабирование
-	scaleWidth := maxWidthBlocks
-	scaleHeight := int(math.Round(float64(imgHeight) * float64(scaleWidth) / float64(imgWidth)))
+	scaleWidth := *widthPtr
+	scaleHeight := *heightPtr
 
-	if scaleHeight > maxHeightBlocks {
-		scaleHeight = maxHeightBlocks
-		scaleWidth = int(math.Round(float64(imgWidth) * float64(scaleHeight) / float64(imgHeight)))
+	// Если задана только ширина
+	if scaleWidth > 0 && scaleHeight <= 0 {
+		scaleHeight = int(math.Round(float64(imgHeight) * float64(scaleWidth) / float64(imgWidth) / 2))
+	}
+
+	// Если задана только высота
+	if scaleHeight > 0 && scaleWidth <= 0 {
+		scaleWidth = int(math.Round(float64(imgWidth) * float64(scaleHeight*2) / float64(imgHeight)))
+	}
+
+	// Если ни одно не задано — подбираем под терминал
+	if scaleWidth <= 0 && scaleHeight <= 0 {
+		maxWidth := termWidth
+		maxHeight := termHeight
+
+		scaleWidth = maxWidth
+		scaleHeight = int(math.Round(float64(imgHeight) * float64(scaleWidth) / float64(imgWidth) / 2))
+		if scaleHeight > maxHeight {
+			scaleHeight = maxHeight
+			scaleWidth = int(math.Round(float64(imgWidth) * float64(scaleHeight*2) / float64(imgHeight)))
+		}
 	}
 
 	if scaleWidth < 1 {
