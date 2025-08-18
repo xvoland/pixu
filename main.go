@@ -79,6 +79,26 @@ func (r *ImageRenderer) getBlockArtLines(img image.Image) []string {
 				grayTop := uint8(0.299*float64(tr8) + 0.587*float64(tg8) + 0.114*float64(tb8))
 				grayBottom := uint8(0.299*float64(br8) + 0.587*float64(bg8) + 0.114*float64(bb8))
 				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s", grayTop, grayTop, grayTop, grayBottom, grayBottom, grayBottom, r.char)
+			case "bw":
+				// Black & White mode: threshold at 128
+				grayTop := 0.299*float64(tr8) + 0.587*float64(tg8) + 0.114*float64(tb8)
+				grayBottom := 0.299*float64(br8) + 0.587*float64(bg8) + 0.114*float64(bb8)
+
+				// threshold at 128
+				var topChar, bottomChar string
+				if grayTop > 128 {
+					topChar = " "
+				} else {
+					topChar = r.char
+				}
+
+				if grayBottom > 128 {
+					bottomChar = " "
+				} else {
+					bottomChar = r.char
+				}
+
+				line += fmt.Sprintf("%s%s", topChar, bottomChar)
 			default: // rgb
 				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s", tr8, tg8, tb8, br8, bg8, bb8, r.char)
 			}
