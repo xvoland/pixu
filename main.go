@@ -12,6 +12,7 @@ import (
 
 	"github.com/disintegration/imaging"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var (
@@ -149,6 +150,14 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 	return lines
 }
 
+func createLink(url, text string) string {
+	if !term.IsTerminal(int(os.Stdout.Fd())) {
+		return fmt.Sprintf("%s", url)
+	} else {
+		return fmt.Sprintf("\033]8;;%s\033\\%s\033]8;;\033\\", url, text)
+	}
+}
+
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "pixu <image>",
@@ -199,7 +208,11 @@ func main() {
 	rootCmd.PreRun = func(cmd *cobra.Command, args []string) {
 		v, _ := cmd.Flags().GetBool("version")
 		if v {
-			fmt.Println("pixu version", version)
+			fmt.Println("PIXU version", version)
+			fmt.Println("")
+			fmt.Println("Homepage: ", createLink("https://dotoca.net/pixu", "https://dotoca.net/pixu"))
+			fmt.Println("Donation: ", createLink("https://paypal.me/xvoland", "https://paypal.me/xvoland"))
+			fmt.Println("Copyright © 2025, Vitalii Tereshchuk | URL:", createLink("https://dotoca.net", "DOTOCA.NET"), "| All rights reserved.")
 			os.Exit(0)
 		}
 	}
