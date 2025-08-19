@@ -20,7 +20,7 @@ var (
 	mode                  string
 	invert                bool
 	char                  string
-	version               = "0.4.0"
+	version               = "0.4.1"
 )
 
 // ImageRenderer holds rendering options
@@ -208,7 +208,7 @@ func main() {
 	rootCmd.PreRun = func(cmd *cobra.Command, args []string) {
 		v, _ := cmd.Flags().GetBool("version")
 		if v {
-			fmt.Println("PIXU version", version)
+			fmt.Println("\033[1;36mPIXU version", version, "\033[0m")
 			fmt.Println("")
 			fmt.Println("Homepage: ", createLink("https://dotoca.net/pixu", "https://dotoca.net/pixu"))
 			fmt.Println("Donation: ", createLink("https://paypal.me/xvoland", "https://paypal.me/xvoland"))
