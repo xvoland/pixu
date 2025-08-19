@@ -1,6 +1,6 @@
 # Go cross-compilation Makefile with ARM support (static binaries)
 
-APP_NAME := img2ascii
+APP_NAME := pixu
 SRC := main.go
 BIN_DIR := bin
 
