@@ -17,6 +17,7 @@ type ImageRenderer struct {
 	mode   string
 	invert bool
 	char   string
+	rotate int
 }
 
 func rgbTo256(r, g, b uint8) int {
@@ -27,6 +28,19 @@ func rgbTo256(r, g, b uint8) int {
 }
 
 func (r *ImageRenderer) getBlockArtLines(img image.Image) []string {
+
+	// image rotation
+	if r.rotate > 0 {
+		switch r.rotate {
+		case 180:
+			img = imaging.Rotate180(img)
+		case 270:
+			img = imaging.Rotate270(img) // 90° CW
+		case 90:
+			img = imaging.Rotate90(img) // 90° CCW
+		}
+	}
+
 	resized := imaging.Resize(img, r.width, r.height*2, imaging.Lanczos)
 	bounds := resized.Bounds()
 
@@ -107,6 +121,7 @@ func main() {
 	modePtr := flag.String("mode", "rgb", "Mode: rgb/grayscale/ascii")
 	invertPtr := flag.Bool("invert", false, "Invert colors")
 	charPtr := flag.String("char", "▀", "Block character to use")
+	rotateDegree := flag.Int("rotate", 0, "Rotate degree: 90, 180, 270")
 	flag.CommandLine.Parse(os.Args[2:])
 
 	img, err := imaging.Open(imgPath)
@@ -136,6 +151,7 @@ func main() {
 		mode:   *modePtr,
 		invert: *invertPtr,
 		char:   *charPtr,
+		rotate: *rotateDegree,
 	}
 
 	lines := renderer.getBlockArtLines(img)
@@ -143,4 +159,5 @@ func main() {
 	for _, line := range lines {
 		fmt.Println(line)
 	}
+
 }
