@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
-	"flag"
 	"fmt"
 	"image"
 	"image/png"
@@ -12,18 +11,27 @@ import (
 	"os"
 
 	"github.com/disintegration/imaging"
+	"github.com/spf13/cobra"
 )
 
+var (
+	width, height, rotate int
+	mode                  string
+	invert                bool
+	char                  string
+	version               = "1.0.0"
+)
+
+// ImageRenderer holds rendering options
 type ImageRenderer struct {
-	width  int
-	height int
-	mode   string
-	invert bool
-	char   string
-	rotate int
+	width, height int
+	mode          string
+	invert        bool
+	char          string
+	rotate        int
 }
 
-// rgbTo256 converts RGB values to 256-color terminal code
+// rgbTo256 converts RGB to 256-color terminal code
 func rgbTo256(r, g, b uint8) int {
 	r6 := int(float64(r) * 5 / 255)
 	g6 := int(float64(g) * 5 / 255)
@@ -31,7 +39,7 @@ func rgbTo256(r, g, b uint8) int {
 	return 16 + 36*r6 + 6*g6 + b6
 }
 
-// calculateSize computes missing width or height automatically
+// calculateSize computes width/height automatically
 func calculateSize(img image.Image, width, height int, isTGP bool) (int, int) {
 	imgW := img.Bounds().Dx()
 	imgH := img.Bounds().Dy()
@@ -59,7 +67,7 @@ func calculateSize(img image.Image, width, height int, isTGP bool) (int, int) {
 	return width, height
 }
 
-// rotateImage rotates the image according to specified degrees
+// rotateImage rotates the image by degrees
 func rotateImage(img image.Image, degrees int) image.Image {
 	switch degrees {
 	case 90:
@@ -73,7 +81,7 @@ func rotateImage(img image.Image, degrees int) image.Image {
 	}
 }
 
-// printTGP prints the image using Kitty graphics protocol
+// printTGP prints image using Kitty graphics protocol
 func printTGP(img image.Image, width, height int) {
 	resized := imaging.Resize(img, width, height, imaging.Lanczos)
 	buf := new(bytes.Buffer)
@@ -84,7 +92,7 @@ func printTGP(img image.Image, width, height int) {
 	fmt.Printf("\033_Gf=100,t=d,w=%d,h=%d;%s\033\\", width, height, data)
 }
 
-// renderTerminal generates terminal representation (ASCII/256/Grayscale/RGB)
+// renderTerminal returns terminal representation lines
 func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 	img = rotateImage(img, r.rotate)
 	resized := imaging.Resize(img, r.width, r.height*2, imaging.Lanczos)
@@ -133,7 +141,7 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 			}
 		}
 		if r.mode != "ascii" {
-			line += "\033[0m" // reset colors
+			line += "\033[0m"
 		}
 		lines = append(lines, line)
 	}
@@ -142,42 +150,61 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Println("Usage: go run main.go <image> [flags]")
-		return
-	}
-	imgPath := os.Args[1]
+	rootCmd := &cobra.Command{
+		Use:   "pixu <image>",
+		Short: "Render images in terminal",
+		Args:  cobra.MinimumNArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			imgPath := args[0]
+			img, err := imaging.Open(imgPath)
+			if err != nil {
+				log.Fatalf("Error loading image: %v", err)
+			}
 
-	widthPtr := flag.Int("width", 0, "Width in characters")
-	heightPtr := flag.Int("height", 0, "Height in characters")
-	modePtr := flag.String("mode", "rgb", "Mode: rgb/grayscale/ascii/tgp")
-	invertPtr := flag.Bool("invert", false, "Invert colors")
-	charPtr := flag.String("char", "▀", "Block character to use")
-	rotateDegree := flag.Int("rotate", 0, "Rotate degree: 90, 180, 270")
-	flag.CommandLine.Parse(os.Args[2:])
+			scaleWidth, scaleHeight := calculateSize(img, width, height, mode == "tgp")
 
-	img, err := imaging.Open(imgPath)
-	if err != nil {
-		log.Fatalf("Error loading image: %v", err)
-	}
+			if mode == "tgp" {
+				printTGP(img, scaleWidth, scaleHeight)
+				return
+			}
 
-	scaleWidth, scaleHeight := calculateSize(img, *widthPtr, *heightPtr, *modePtr == "tgp")
+			renderer := &ImageRenderer{
+				width:  scaleWidth,
+				height: scaleHeight,
+				mode:   mode,
+				invert: invert,
+				char:   char,
+				rotate: rotate,
+			}
 
-	if *modePtr == "tgp" {
-		printTGP(img, scaleWidth, scaleHeight)
-		return
-	}
-
-	renderer := &ImageRenderer{
-		width:  scaleWidth,
-		height: scaleHeight,
-		mode:   *modePtr,
-		invert: *invertPtr,
-		char:   *charPtr,
-		rotate: *rotateDegree,
+			for _, line := range renderer.renderTerminal(img) {
+				fmt.Println(line)
+			}
+		},
 	}
 
-	for _, line := range renderer.renderTerminal(img) {
-		fmt.Println(line)
+	// remove default -h help to free it for height
+	rootCmd.SetHelpCommand(&cobra.Command{Hidden: true})
+	rootCmd.Flags().Bool("help", false, "Show help") // keep --help
+
+	rootCmd.Flags().IntVarP(&height, "height", "h", 0, "Height in characters")
+	rootCmd.Flags().IntVarP(&width, "width", "w", 0, "Width in characters")
+	rootCmd.Flags().StringVarP(&mode, "mode", "m", "rgb", "Mode: rgb/grayscale/ascii/tgp")
+	rootCmd.Flags().BoolVarP(&invert, "invert", "i", false, "Invert colors")
+	rootCmd.Flags().StringVarP(&char, "char", "c", "▀", "Block character to use")
+	rootCmd.Flags().IntVarP(&rotate, "rotate", "r", 0, "Rotate: 90,180,270")
+	rootCmd.Flags().BoolP("version", "v", false, "Show version")
+
+	// handle version
+	rootCmd.PreRun = func(cmd *cobra.Command, args []string) {
+		v, _ := cmd.Flags().GetBool("version")
+		if v {
+			fmt.Println("pixu version", version)
+			os.Exit(0)
+		}
+	}
+
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
 	}
 }
