@@ -23,7 +23,7 @@ type ImageRenderer struct {
 	rotate int
 }
 
-// rgbTo256 converts RGB values to a 256-color terminal code
+// rgbTo256 converts RGB values to 256-color terminal code
 func rgbTo256(r, g, b uint8) int {
 	r6 := int(float64(r) * 5 / 255)
 	g6 := int(float64(g) * 5 / 255)
@@ -31,25 +31,66 @@ func rgbTo256(r, g, b uint8) int {
 	return 16 + 36*r6 + 6*g6 + b6
 }
 
-// getBlockArtLines generates the terminal representation of the image
-func (r *ImageRenderer) getBlockArtLines(img image.Image) []string {
-	// Rotate the image if needed
-	if r.rotate > 0 {
-		switch r.rotate {
-		case 90:
-			img = imaging.Rotate90(img)
-		case 180:
-			img = imaging.Rotate180(img)
-		case 270:
-			img = imaging.Rotate270(img)
+// calculateSize computes missing width or height automatically
+func calculateSize(img image.Image, width, height int, isTGP bool) (int, int) {
+	imgW := img.Bounds().Dx()
+	imgH := img.Bounds().Dy()
+
+	if width > 0 && height == 0 {
+		if isTGP {
+			height = int(math.Round(float64(imgH) * float64(width) / float64(imgW)))
+		} else {
+			height = int(math.Round(float64(imgH) * float64(width) / float64(imgW) / 2))
+		}
+	} else if height > 0 && width == 0 {
+		if isTGP {
+			width = int(math.Round(float64(imgW) * float64(height) / float64(imgH)))
+		} else {
+			width = int(math.Round(float64(imgW) * float64(height*2) / float64(imgH)))
+		}
+	} else if width == 0 && height == 0 {
+		width = 40
+		if isTGP {
+			height = int(math.Round(float64(imgH) * float64(width) / float64(imgW)))
+		} else {
+			height = int(math.Round(float64(imgH) * float64(width) / float64(imgW) / 2))
 		}
 	}
+	return width, height
+}
 
-	// Resize the image (height*2 because we use half-block characters)
+// rotateImage rotates the image according to specified degrees
+func rotateImage(img image.Image, degrees int) image.Image {
+	switch degrees {
+	case 90:
+		return imaging.Rotate90(img)
+	case 180:
+		return imaging.Rotate180(img)
+	case 270:
+		return imaging.Rotate270(img)
+	default:
+		return img
+	}
+}
+
+// printTGP prints the image using Kitty graphics protocol
+func printTGP(img image.Image, width, height int) {
+	resized := imaging.Resize(img, width, height, imaging.Lanczos)
+	buf := new(bytes.Buffer)
+	if err := png.Encode(buf, resized); err != nil {
+		log.Fatalf("Failed to encode image: %v", err)
+	}
+	data := base64.StdEncoding.EncodeToString(buf.Bytes())
+	fmt.Printf("\033_Gf=100,t=d,w=%d,h=%d;%s\033\\", width, height, data)
+}
+
+// renderTerminal generates terminal representation (ASCII/256/Grayscale/RGB)
+func (r *ImageRenderer) renderTerminal(img image.Image) []string {
+	img = rotateImage(img, r.rotate)
 	resized := imaging.Resize(img, r.width, r.height*2, imaging.Lanczos)
 	bounds := resized.Bounds()
-
 	lines := make([]string, 0, bounds.Dy()/2)
+
 	asciiChars := "@#%*+=-:. "
 	if r.mode == "ascii" && r.char != "" {
 		asciiChars = r.char
@@ -66,25 +107,21 @@ func (r *ImageRenderer) getBlockArtLines(img image.Image) []string {
 
 			tr, tg, tb, _ := topColor.RGBA()
 			br, bg, bb, _ := bottomColor.RGBA()
-
 			tr8, tg8, tb8 := uint8(tr>>8), uint8(tg>>8), uint8(tb>>8)
 			br8, bg8, bb8 := uint8(br>>8), uint8(bg>>8), uint8(bb>>8)
 
-			// Invert colors if requested
 			if r.invert {
 				tr8, tg8, tb8 = 255-tr8, 255-tg8, 255-tb8
 				br8, bg8, bb8 = 255-br8, 255-bg8, 255-bb8
 			}
 
-			// Render according to the selected mode
 			switch r.mode {
 			case "ascii":
-				asciiRunes := []rune(asciiChars)
 				grayTop := 0.299*float64(tr8) + 0.587*float64(tg8) + 0.114*float64(tb8)
 				grayBottom := 0.299*float64(br8) + 0.587*float64(bg8) + 0.114*float64(bb8)
 				avgGray := (grayTop + grayBottom) / 2
-				index := int(avgGray / 255 * float64(len(asciiRunes)-1))
-				line += string(asciiRunes[index])
+				index := int(avgGray / 255 * float64(len(asciiChars)-1))
+				line += string([]rune(asciiChars)[index])
 			case "256":
 				line += fmt.Sprintf("\033[38;5;%d;48;5;%dm▀", rgbTo256(tr8, tg8, tb8), rgbTo256(br8, bg8, bb8))
 			case "grayscale":
@@ -92,11 +129,9 @@ func (r *ImageRenderer) getBlockArtLines(img image.Image) []string {
 				grayBottom := uint8(0.299*float64(br8) + 0.587*float64(bg8) + 0.114*float64(bb8))
 				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s", grayTop, grayTop, grayTop, grayBottom, grayBottom, grayBottom, r.char)
 			default:
-				// Default: truecolor block
 				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s", tr8, tg8, tb8, br8, bg8, bb8, r.char)
 			}
 		}
-
 		if r.mode != "ascii" {
 			line += "\033[0m" // reset colors
 		}
@@ -104,45 +139,6 @@ func (r *ImageRenderer) getBlockArtLines(img image.Image) []string {
 	}
 
 	return lines
-}
-
-// printTGP prints the image using TGP (Kitty graphics protocol)
-func printTGP(img image.Image, width, height int) {
-	resized := imaging.Resize(img, width, height, imaging.Lanczos)
-	buf := new(bytes.Buffer)
-	if err := png.Encode(buf, resized); err != nil {
-		log.Fatalf("Failed to encode image: %v", err)
-	}
-	data := base64.StdEncoding.EncodeToString(buf.Bytes())
-	fmt.Printf("\033_Gf=100,t=d,w=%d,h=%d;%s\033\\", width, height, data)
-}
-
-// calculateSize automatically calculates missing width/height
-func calculateSize(img image.Image, width, height int, isTGP bool) (int, int) {
-	imgWidth := img.Bounds().Dx()
-	imgHeight := img.Bounds().Dy()
-
-	if width > 0 && height == 0 {
-		if isTGP {
-			height = int(math.Round(float64(imgHeight) * float64(width) / float64(imgWidth)))
-		} else {
-			height = int(math.Round(float64(imgHeight) * float64(width) / float64(imgWidth) / 2))
-		}
-	} else if height > 0 && width == 0 {
-		if isTGP {
-			width = int(math.Round(float64(imgWidth) * float64(height) / float64(imgHeight)))
-		} else {
-			width = int(math.Round(float64(imgWidth) * float64(height*2) / float64(imgHeight)))
-		}
-	} else if width == 0 && height == 0 {
-		width = 40
-		if isTGP {
-			height = int(math.Round(float64(imgHeight) * float64(width) / float64(imgWidth)))
-		} else {
-			height = int(math.Round(float64(imgHeight) * float64(width) / float64(imgWidth) / 2))
-		}
-	}
-	return width, height
 }
 
 func main() {
@@ -165,7 +161,6 @@ func main() {
 		log.Fatalf("Error loading image: %v", err)
 	}
 
-	// Calculate width and height automatically
 	scaleWidth, scaleHeight := calculateSize(img, *widthPtr, *heightPtr, *modePtr == "tgp")
 
 	if *modePtr == "tgp" {
@@ -182,8 +177,7 @@ func main() {
 		rotate: *rotateDegree,
 	}
 
-	lines := renderer.getBlockArtLines(img)
-	for _, line := range lines {
+	for _, line := range renderer.renderTerminal(img) {
 		fmt.Println(line)
 	}
 }
