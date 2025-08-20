@@ -21,7 +21,8 @@ var (
 	mode                  string
 	invert                bool
 	char                  string
-	version               = "0.4.6"
+	version               = "0.4.7"
+	showVersion           bool
 )
 
 // ImageRenderer holds rendering options
@@ -243,10 +244,15 @@ func main() {
 	rootCmd := &cobra.Command{
 		Use:   "pixu",
 		Short: "\033[1;36mPIXU: ANSI and TGP render images in terminal\033[0m",
-		Args:  cobra.MaximumNArgs(1), // можно 0 или 1 аргумент
+		Args:  cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
+			if showVersion {
+				fmt.Println(version)
+				return
+			}
+
 			if len(args) == 0 {
-				cmd.Help() // просто выводим помощь, не ругаемся
+				cmd.Help()
 				return
 			}
 
@@ -295,6 +301,7 @@ func main() {
 	rootCmd.Flags().BoolVarP(&invert, "invert", "i", false, "Invert colors")
 	rootCmd.Flags().StringVarP(&char, "char", "c", "▀", "Block character to use")
 	rootCmd.Flags().IntVarP(&rotate, "rotate", "r", 0, "Rotate: 90,180,270")
+	rootCmd.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "Show version and exit")
 
 	applyEnvDefaults() // apply default values from environment variables
 
