@@ -20,7 +20,7 @@ var (
 	mode                  string
 	invert                bool
 	char                  string
-	version               = "0.4.1"
+	version               = "0.4.3"
 )
 
 // ImageRenderer holds rendering options
@@ -100,7 +100,6 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 	bounds := resized.Bounds()
 	lines := make([]string, 0, bounds.Dy()/2)
 
-	// Fixed ASCII chars to prevent panic
 	asciiChars := "@#%*+=-:. "
 
 	for y := bounds.Min.Y; y < bounds.Max.Y; y += 2 {
@@ -143,13 +142,21 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 				}
 				line += string(runes[index])
 			case "256":
-				line += fmt.Sprintf("\033[38;5;%d;48;5;%dm▀", rgbTo256(tr8, tg8, tb8), rgbTo256(br8, bg8, bb8))
+				line += fmt.Sprintf("\033[38;5;%d;48;5;%dm▀",
+					rgbTo256(tr8, tg8, tb8),
+					rgbTo256(br8, bg8, bb8))
 			case "grayscale":
 				grayTop := uint8(0.299*float64(tr8) + 0.587*float64(tg8) + 0.114*float64(tb8))
 				grayBottom := uint8(0.299*float64(br8) + 0.587*float64(bg8) + 0.114*float64(bb8))
-				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s", grayTop, grayTop, grayTop, grayBottom, grayBottom, grayBottom, r.char)
+				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s",
+					grayTop, grayTop, grayTop,
+					grayBottom, grayBottom, grayBottom,
+					r.char)
 			default: // rgb
-				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s", tr8, tg8, tb8, br8, bg8, bb8, r.char)
+				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s",
+					tr8, tg8, tb8,
+					br8, bg8, bb8,
+					r.char)
 			}
 		}
 
@@ -172,9 +179,14 @@ func createLink(url, text string) string {
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "pixu <image>",
-		Short: "Render images in terminal",
-		Args:  cobra.MinimumNArgs(1),
+		Short: "\033[1;36mPIXU: ANSI and TGP render images in terminal\033[0m",
 		Run: func(cmd *cobra.Command, args []string) {
+			if len(args) == 0 {
+				// no args → show help instead of error
+				cmd.Help()
+				return
+			}
+
 			imgPath := args[0]
 			img, err := imaging.Open(imgPath)
 			if err != nil {
@@ -203,27 +215,32 @@ func main() {
 		},
 	}
 
+	// Disable built-in help command
 	rootCmd.SetHelpCommand(&cobra.Command{Hidden: true})
-	rootCmd.Flags().Bool("help", false, "Show help")
+	rootCmd.PersistentFlags().Bool("help", false, "")
+
+	// Flags
 	rootCmd.Flags().IntVarP(&height, "height", "h", 0, "Height in characters")
 	rootCmd.Flags().IntVarP(&width, "width", "w", 0, "Width in characters")
 	rootCmd.Flags().StringVarP(&mode, "mode", "m", "rgb", "Mode: rgb/grayscale/ascii/tgp")
 	rootCmd.Flags().BoolVarP(&invert, "invert", "i", false, "Invert colors")
 	rootCmd.Flags().StringVarP(&char, "char", "c", "▀", "Block character to use")
 	rootCmd.Flags().IntVarP(&rotate, "rotate", "r", 0, "Rotate: 90,180,270")
-	rootCmd.Flags().BoolP("version", "v", false, "Show version")
 
-	rootCmd.PreRun = func(cmd *cobra.Command, args []string) {
-		v, _ := cmd.Flags().GetBool("version")
-		if v {
+	// version command only (like git)
+	var versionCmd = &cobra.Command{
+		Use:   "version",
+		Short: "Show version",
+		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Println("\033[1;36mPIXU version", version, "\033[0m")
 			fmt.Println("")
 			fmt.Println("Homepage: ", createLink("https://dotoca.net/pixu", "https://dotoca.net/pixu"))
 			fmt.Println("Donation: ", createLink("https://paypal.me/xvoland", "https://paypal.me/xvoland"))
-			fmt.Println("Copyright © 2025, Vitalii Tereshchuk | URL:", createLink("https://dotoca.net", "DOTOCA.NET"))
-			os.Exit(0)
-		}
+			fmt.Println("Copyright © 2025, Vitalii Tereshchuk | URL:",
+				createLink("https://dotoca.net", "DOTOCA.NET"))
+		},
 	}
+	rootCmd.AddCommand(versionCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
