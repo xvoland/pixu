@@ -128,13 +128,20 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 				grayBottom := 0.299*float64(br8) + 0.587*float64(bg8) + 0.114*float64(bb8)
 				avgGray := (grayTop + grayBottom) / 2
 
-				index := int(avgGray / 255 * float64(len(asciiChars)-1))
-				if index < 0 {
-					index = 0
-				} else if index >= len(asciiChars) {
-					index = len(asciiChars) - 1
+				chars := asciiChars
+				if r.char != "" {
+					chars = r.char
 				}
-				line += string([]rune(asciiChars)[index])
+				if len(chars) == 0 {
+					chars = "@"
+				}
+
+				runes := []rune(chars)
+				index := int(avgGray / 255 * float64(len(runes)))
+				if index >= len(runes) {
+					index = len(runes) - 1
+				}
+				line += string(runes[index])
 			case "256":
 				line += fmt.Sprintf("\033[38;5;%d;48;5;%dm▀", rgbTo256(tr8, tg8, tb8), rgbTo256(br8, bg8, bb8))
 			case "grayscale":
