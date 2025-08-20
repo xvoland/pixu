@@ -21,7 +21,7 @@ var (
 	mode                  string
 	invert                bool
 	char                  string
-	version               = "0.4.7"
+	version               = "0.5.0"
 	showVersion           bool
 )
 
