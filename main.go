@@ -9,6 +9,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"strconv"
 
 	"github.com/disintegration/imaging"
 	"github.com/spf13/cobra"
@@ -30,6 +31,7 @@ type ImageRenderer struct {
 	invert        bool
 	char          string
 	rotate        int
+	asciiChars    string
 }
 
 // rgbTo256 converts RGB to 256-color terminal code
@@ -100,8 +102,6 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 	bounds := resized.Bounds()
 	lines := make([]string, 0, bounds.Dy()/2)
 
-	asciiChars := "@#%*+=-:. "
-
 	for y := bounds.Min.Y; y < bounds.Max.Y; y += 2 {
 		line := ""
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
@@ -127,10 +127,12 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 				grayBottom := 0.299*float64(br8) + 0.587*float64(bg8) + 0.114*float64(bb8)
 				avgGray := (grayTop + grayBottom) / 2
 
-				chars := asciiChars
+				// asciiChars := "@#%*+=-:. "
+				chars := r.asciiChars
 				if r.char != "" {
 					chars = r.char
 				}
+
 				if len(chars) == 0 {
 					chars = "@"
 				}
@@ -176,14 +178,48 @@ func createLink(url, text string) string {
 	return fmt.Sprintf("\033]8;;%s\033\\%s\033]8;;\033\\", url, text)
 }
 
+// apply environment defaults
+func applyEnvDefaults() {
+	var envDefaults = map[string]interface{}{
+		"PIXU_WIDTH":  &width,
+		"PIXU_HEIGHT": &height,
+		"PIXU_MODE":   &mode,
+		"PIXU_INVERT": &invert,
+		"PIXU_CHAR":   &char,
+		"PIXU_ROTATE": &rotate,
+	}
+
+	for env, ptr := range envDefaults {
+		val := os.Getenv(env)
+		if val == "" {
+			continue
+		}
+
+		switch p := ptr.(type) {
+		case *int:
+			if v, err := strconv.Atoi(val); err == nil {
+				*p = v
+			}
+		case *string:
+			*p = val
+		case *bool:
+			if val == "1" || val == "true" || val == "TRUE" {
+				*p = true
+			} else if val == "0" || val == "false" || val == "FALSE" {
+				*p = false
+			}
+		}
+	}
+}
+
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   "pixu <image>",
+		Use:   "pixu",
 		Short: "\033[1;36mPIXU: ANSI and TGP render images in terminal\033[0m",
+		Args:  cobra.MaximumNArgs(1), // можно 0 или 1 аргумент
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) == 0 {
-				// no args → show help instead of error
-				cmd.Help()
+				cmd.Help() // просто выводим помощь, не ругаемся
 				return
 			}
 
@@ -200,13 +236,19 @@ func main() {
 				return
 			}
 
+			ascii := os.Getenv("PIXU_ASCII_CHARS")
+			if ascii == "" {
+				ascii = "@#%*+=-:. "
+			}
+
 			renderer := &ImageRenderer{
-				width:  scaleWidth,
-				height: scaleHeight,
-				mode:   mode,
-				invert: invert,
-				char:   char,
-				rotate: rotate,
+				width:      scaleWidth,
+				height:     scaleHeight,
+				mode:       mode,
+				invert:     invert,
+				char:       char,
+				rotate:     rotate,
+				asciiChars: ascii,
 			}
 
 			for _, line := range renderer.renderTerminal(img) {
@@ -226,6 +268,8 @@ func main() {
 	rootCmd.Flags().BoolVarP(&invert, "invert", "i", false, "Invert colors")
 	rootCmd.Flags().StringVarP(&char, "char", "c", "▀", "Block character to use")
 	rootCmd.Flags().IntVarP(&rotate, "rotate", "r", 0, "Rotate: 90,180,270")
+
+	applyEnvDefaults() // apply default values from environment variables
 
 	// version command only (like git)
 	var versionCmd = &cobra.Command{
