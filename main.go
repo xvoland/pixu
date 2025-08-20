@@ -86,41 +86,72 @@ func rotateImage(img image.Image, degrees int) image.Image {
 }
 
 // printTGP prints image in iTerm2/Kitty using inline image protocol
+const chunkSize = 4096
+
 func printTGP(img image.Image, width, height int, rotate int, invert bool) {
 	term := os.Getenv("TERM_PROGRAM")
 
-	// rotate image
-	if rotate > 0 {
-		if rotate == 90 {
-			img = imaging.Rotate90(img)
-		} else if rotate == 180 {
-			img = imaging.Rotate180(img)
-		} else if rotate == 270 {
-			img = imaging.Rotate270(img)
-		}
+	// Rotate the image according to the specified angle
+	switch rotate {
+	case 90:
+		img = imaging.Rotate90(img)
+	case 180:
+		img = imaging.Rotate180(img)
+	case 270:
+		img = imaging.Rotate270(img)
 	}
 
-	// invert
+	// Invert the image colors if invert flag is true
 	if invert {
-		img = imaging.Invert(img) // встроенная функция или кастомная
+		img = imaging.Invert(img)
 	}
 
+	// Resize the image to the specified width and height
+	// Note: Kitty/Ghostty terminal graphics can take dimensions from PNG metadata,
+	// but resizing is useful to control display size manually
 	resized := imaging.Resize(img, width, height, imaging.Lanczos)
+
+	// Encode the resized image into PNG format
 	buf := new(bytes.Buffer)
 	if err := png.Encode(buf, resized); err != nil {
 		log.Fatalf("Failed to encode image: %v", err)
 	}
+
+	// Convert PNG bytes to base64 for terminal protocols
 	data := base64.StdEncoding.EncodeToString(buf.Bytes())
 
 	switch term {
 	case "iTerm.app":
 		// iTerm2 inline image protocol
+		// \033]1337;File=... sends image inline in iTerm2
 		fmt.Printf("\033]1337;File=name=inline.png;width=auto;height=auto;inline=1:%s\a\n", data)
 	default:
-		// Kitty graphics protocol
-		fmt.Printf("\033_Gf=100,t=d,w=%d,h=%d;%s\033\\", width, height, data)
-	}
+		// Kitty / Ghostty graphics protocol
+		// Split base64 data into chunks to comply with terminal buffer limits
+		for i := 0; i < len(data); i += chunkSize {
+			end := i + chunkSize
+			if end > len(data) {
+				end = len(data)
+			}
+			chunk := data[i:end]
 
+			// more=1 indicates that there are more chunks to follow
+			more := 0
+			if end < len(data) {
+				more = 1
+			}
+
+			if i == 0 {
+				// First chunk includes full parameters (action, format, type)
+				fmt.Printf("\033_Ga=T,f=100,t=d,m=%d;%s\033\\", more, chunk)
+			} else {
+				// Subsequent chunks only include 'more' parameter
+				fmt.Printf("\033_Gm=%d;%s\033\\", more, chunk)
+			}
+		}
+		// Print newline to clean up terminal output (avoid leftover characters like '%')
+		fmt.Print("\n")
+	}
 }
 
 // renderTerminal returns terminal representation lines
