@@ -84,15 +84,42 @@ func rotateImage(img image.Image, degrees int) image.Image {
 	}
 }
 
-// printTGP prints image using Kitty graphics protocol
-func printTGP(img image.Image, width, height int) {
+// printTGP prints image in iTerm2/Kitty using inline image protocol
+func printTGP(img image.Image, width, height int, rotate int, invert bool) {
+	term := os.Getenv("TERM_PROGRAM")
+
+	// rotate image
+	if rotate > 0 {
+		if rotate == 90 {
+			img = imaging.Rotate90(img)
+		} else if rotate == 180 {
+			img = imaging.Rotate180(img)
+		} else if rotate == 270 {
+			img = imaging.Rotate270(img)
+		}
+	}
+
+	// invert
+	if invert {
+		img = imaging.Invert(img) // встроенная функция или кастомная
+	}
+
 	resized := imaging.Resize(img, width, height, imaging.Lanczos)
 	buf := new(bytes.Buffer)
 	if err := png.Encode(buf, resized); err != nil {
 		log.Fatalf("Failed to encode image: %v", err)
 	}
 	data := base64.StdEncoding.EncodeToString(buf.Bytes())
-	fmt.Printf("\033_Gf=100,t=d,w=%d,h=%d;%s\033\\", width, height, data)
+
+	switch term {
+	case "iTerm.app":
+		// iTerm2 inline image protocol
+		fmt.Printf("\033]1337;File=name=inline.png;width=auto;height=auto;inline=1:%s\a\n", data)
+	default:
+		// Kitty graphics protocol
+		fmt.Printf("\033_Gf=100,t=d,w=%d,h=%d;%s\033\\", width, height, data)
+	}
+
 }
 
 // renderTerminal returns terminal representation lines
@@ -224,7 +251,7 @@ func main() {
 			}
 
 			imgPath := args[0]
-			img, err := imaging.Open(imgPath)
+			img, err := imaging.Open(imgPath, imaging.AutoOrientation(true))
 			if err != nil {
 				log.Fatalf("Error loading image: %v", err)
 			}
@@ -232,7 +259,7 @@ func main() {
 			scaleWidth, scaleHeight := calculateSize(img, width, height, mode == "tgp")
 
 			if mode == "tgp" {
-				printTGP(img, scaleWidth, scaleHeight)
+				printTGP(img, scaleWidth, scaleHeight, rotate, invert)
 				return
 			}
 
