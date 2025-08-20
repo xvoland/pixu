@@ -100,10 +100,8 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 	bounds := resized.Bounds()
 	lines := make([]string, 0, bounds.Dy()/2)
 
+	// Fixed ASCII chars to prevent panic
 	asciiChars := "@#%*+=-:. "
-	if r.mode == "ascii" && r.char != "" {
-		asciiChars = r.char
-	}
 
 	for y := bounds.Min.Y; y < bounds.Max.Y; y += 2 {
 		line := ""
@@ -129,7 +127,13 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 				grayTop := 0.299*float64(tr8) + 0.587*float64(tg8) + 0.114*float64(tb8)
 				grayBottom := 0.299*float64(br8) + 0.587*float64(bg8) + 0.114*float64(bb8)
 				avgGray := (grayTop + grayBottom) / 2
+
 				index := int(avgGray / 255 * float64(len(asciiChars)-1))
+				if index < 0 {
+					index = 0
+				} else if index >= len(asciiChars) {
+					index = len(asciiChars) - 1
+				}
 				line += string([]rune(asciiChars)[index])
 			case "256":
 				line += fmt.Sprintf("\033[38;5;%d;48;5;%dm▀", rgbTo256(tr8, tg8, tb8), rgbTo256(br8, bg8, bb8))
@@ -137,10 +141,11 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 				grayTop := uint8(0.299*float64(tr8) + 0.587*float64(tg8) + 0.114*float64(tb8))
 				grayBottom := uint8(0.299*float64(br8) + 0.587*float64(bg8) + 0.114*float64(bb8))
 				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s", grayTop, grayTop, grayTop, grayBottom, grayBottom, grayBottom, r.char)
-			default:
+			default: // rgb
 				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s", tr8, tg8, tb8, br8, bg8, bb8, r.char)
 			}
 		}
+
 		if r.mode != "ascii" {
 			line += "\033[0m"
 		}
@@ -153,9 +158,8 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 func createLink(url, text string) string {
 	if !term.IsTerminal(int(os.Stdout.Fd())) {
 		return fmt.Sprintf("%s", url)
-	} else {
-		return fmt.Sprintf("\033]8;;%s\033\\%s\033]8;;\033\\", url, text)
 	}
+	return fmt.Sprintf("\033]8;;%s\033\\%s\033]8;;\033\\", url, text)
 }
 
 func main() {
@@ -192,10 +196,8 @@ func main() {
 		},
 	}
 
-	// remove default -h help to free it for height
 	rootCmd.SetHelpCommand(&cobra.Command{Hidden: true})
-	rootCmd.Flags().Bool("help", false, "Show help") // keep --help
-
+	rootCmd.Flags().Bool("help", false, "Show help")
 	rootCmd.Flags().IntVarP(&height, "height", "h", 0, "Height in characters")
 	rootCmd.Flags().IntVarP(&width, "width", "w", 0, "Width in characters")
 	rootCmd.Flags().StringVarP(&mode, "mode", "m", "rgb", "Mode: rgb/grayscale/ascii/tgp")
@@ -204,7 +206,6 @@ func main() {
 	rootCmd.Flags().IntVarP(&rotate, "rotate", "r", 0, "Rotate: 90,180,270")
 	rootCmd.Flags().BoolP("version", "v", false, "Show version")
 
-	// handle version
 	rootCmd.PreRun = func(cmd *cobra.Command, args []string) {
 		v, _ := cmd.Flags().GetBool("version")
 		if v {
@@ -212,12 +213,13 @@ func main() {
 			fmt.Println("")
 			fmt.Println("Homepage: ", createLink("https://dotoca.net/pixu", "https://dotoca.net/pixu"))
 			fmt.Println("Donation: ", createLink("https://paypal.me/xvoland", "https://paypal.me/xvoland"))
-			fmt.Println("Copyright © 2025, Vitalii Tereshchuk | URL:", createLink("https://dotoca.net", "DOTOCA.NET"), "| All rights reserved.")
+			fmt.Println("Copyright © 2025, Vitalii Tereshchuk | URL:", createLink("https://dotoca.net", "DOTOCA.NET"))
 			os.Exit(0)
 		}
 	}
 
 	if err := rootCmd.Execute(); err != nil {
+		fmt.Println(err)
 		os.Exit(1)
 	}
 }
