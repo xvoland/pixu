@@ -21,7 +21,7 @@ var (
 	mode                  string
 	invert                bool
 	char                  string
-	version               = "0.4.5"
+	version               = "0.4.6"
 )
 
 // ImageRenderer holds rendering options
