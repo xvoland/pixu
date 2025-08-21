@@ -237,6 +237,16 @@ func createLink(url, text string) string {
 	return fmt.Sprintf("\033]8;;%s\033\\%s\033]8;;\033\\", url, text)
 }
 
+func printCopyleft() {
+	fmt.Println("")
+	fmt.Println("Homepage: ", createLink("https://dotoca.net/pixu", "https://dotoca.net/pixu"))
+	fmt.Println("Youtube:  ", createLink("https://youtube.com/@xvoland", "https://youtube.com/@xvoland"))
+	fmt.Println("Donation: ", createLink("https://paypal.me/xvoland", "https://paypal.me/xvoland"))
+	fmt.Println("Copyright © 2025, Vitalii Tereshchuk | URL:",
+		createLink("https://dotoca.net", "DOTOCA.NET"))
+
+}
+
 // apply environment defaults
 func applyEnvDefaults() {
 	var envDefaults = map[string]interface{}{
@@ -274,11 +284,12 @@ func applyEnvDefaults() {
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "pixu",
-		Short: "\033[1;36mPIXU: ANSI and TGP render images in terminal\033[0m",
+		Short: "PIXU: ANSI and TGP render images in terminal",
 		Args:  cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			if showVersion {
-				fmt.Println(version)
+				fmt.Println("pixu", version)
+				printCopyleft()
 				return
 			}
 
@@ -341,12 +352,8 @@ func main() {
 		Use:   "version",
 		Short: "Show version",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("\033[1;36mPIXU version", version, "\033[0m")
-			fmt.Println("")
-			fmt.Println("Homepage: ", createLink("https://dotoca.net/pixu", "https://dotoca.net/pixu"))
-			fmt.Println("Donation: ", createLink("https://paypal.me/xvoland", "https://paypal.me/xvoland"))
-			fmt.Println("Copyright © 2025, Vitalii Tereshchuk | URL:",
-				createLink("https://dotoca.net", "DOTOCA.NET"))
+			fmt.Println("PIXU version", version)
+			printCopyleft()
 		},
 	}
 	rootCmd.AddCommand(versionCmd)
