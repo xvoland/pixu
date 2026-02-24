@@ -442,19 +442,14 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 			displayW := width
 			displayH := height
 
+			termPixelW := termW * 10
+			termPixelH := (termH - 6) * 20
+
 			if displayW == 0 && displayH == 0 {
-				if imgW <= termW && imgH <= termH-4 {
-					displayW = imgW
-					displayH = imgH
-				} else if imgW > termW {
-					displayW = termW
-					displayH = int(math.Round(float64(imgH) * float64(displayW) / float64(imgW)))
-					if displayH > termH-4 {
-						displayH = termH - 4
-						displayW = int(math.Round(float64(imgW) * float64(displayH) / float64(imgH)))
-					}
-				} else if imgH > termH-4 {
-					displayH = termH - 4
+				displayW = termPixelW
+				displayH = int(math.Round(float64(imgH) * float64(displayW) / float64(imgW)))
+				if displayH > termPixelH {
+					displayH = termPixelH
 					displayW = int(math.Round(float64(imgW) * float64(displayH) / float64(imgH)))
 				}
 			} else if displayW > 0 && displayH == 0 && imgW > 0 {
@@ -466,9 +461,10 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 			resized := imaging.Resize(img, displayW, displayH, imaging.Lanczos)
 			printTGPKittyFromImage(resized)
 
+			termRowH := displayH/20 + 3
 			fmt.Printf("\r\033[%dH\033[7m%s | %dx%d | TGP | %d/%d\033[0m\n",
-				displayH+4, filepath.Base(files[currentIndex]), imgW, imgH, currentIndex+1, len(files))
-			fmt.Printf("\033[%dH\033[33m←/→: prev/next | ESC/Ctrl+C: quit\033[0m\n", displayH+5)
+				termRowH, filepath.Base(files[currentIndex]), imgW, imgH, currentIndex+1, len(files))
+			fmt.Printf("\033[%dH\033[33m←/→: prev/next | ESC/Ctrl+C: quit\033[0m\n", termRowH+1)
 			return
 		}
 
@@ -508,8 +504,8 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 
 		fmt.Print("\r")
 		fmt.Printf("\033[%dH\033[7m%s | %dx%d | ASCII | %d/%d\033[0m\n",
-			dispH/2+4, filepath.Base(files[currentIndex]), imgW, imgH, currentIndex+1, len(files))
-		fmt.Printf("\033[%dH\033[33m←/→: prev/next | ESC/Ctrl+C: quit\033[0m\n", dispH/2+5)
+			dispH+3, filepath.Base(files[currentIndex]), imgW, imgH, currentIndex+1, len(files))
+		fmt.Printf("\033[%dH\033[33m←/→: prev/next | ESC/Ctrl+C: quit\033[0m\n", dispH+4)
 	}
 
 	showImage()
@@ -612,7 +608,7 @@ func showQRCode() {
 }
 
 func printTGPKittyFromImage(img image.Image) {
-	fmt.Print("\033[3;H")
+	fmt.Print("\033[3;0H")
 
 	buf := new(bytes.Buffer)
 	png.Encode(buf, img)
