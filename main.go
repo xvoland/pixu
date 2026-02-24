@@ -421,6 +421,8 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 	showImage := func() {
 		termW, termH := getTerminalSize()
 
+		fmt.Print("\033[2J")
+
 		img, err := imaging.Open(files[currentIndex], imaging.AutoOrientation(true))
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
