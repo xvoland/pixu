@@ -417,11 +417,9 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 	}
 
 	currentIndex := 0
-	zoom := 1.0
-	termW, termH := getTerminalSize()
 
 	showImage := func() {
-		fmt.Print("\033[2J\033[H")
+		termW, termH := getTerminalSize()
 
 		img, err := imaging.Open(files[currentIndex], imaging.AutoOrientation(true))
 		if err != nil {
@@ -438,18 +436,19 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 		imgW := bounds.Dx()
 		imgH := bounds.Dy()
 
-		displayW := int(float64(termW) * zoom)
-		displayH := int(float64(displayW) * float64(imgH) / float64(imgW) / 2)
+		displayW := termW
+		displayH := termW * imgH / imgW / 2
 
-		if displayH > int(float64(termH-3)*zoom) {
-			displayH = int(float64(termH-3) * zoom)
-			displayW = int(float64(displayH) * 2 * float64(imgW) / float64(imgH))
+		if displayH > termH-4 {
+			displayH = termH - 4
+			displayW = displayH * 2 * imgW / imgH
 		}
 
 		resized := imaging.Resize(img, displayW, displayH, imaging.Lanczos)
 		bounds = resized.Bounds()
 
 		for y := bounds.Min.Y; y < bounds.Max.Y; y += 2 {
+			fmt.Print("\r")
 			line := ""
 			for x := bounds.Min.X; x < bounds.Max.X; x++ {
 				topColor := resized.At(x, y)
@@ -466,12 +465,14 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm▀\033[0m",
 					tr8, tg8, tb8, br8, bg8, bb8)
 			}
-			fmt.Println(line)
+			fmt.Print(line)
+			fmt.Println()
 		}
 
-		fmt.Printf("\033[7m%s | %dx%d | Zoom: %.1fx | %d/%d\033[0m\n",
-			filepath.Base(files[currentIndex]), imgW, imgH, zoom, currentIndex+1, len(files))
-		fmt.Println("\033[33m←/→: prev/next | +/-: zoom | 0: reset | ?: QR | q: quit\033[0m")
+		fmt.Print("\r")
+		fmt.Printf("\033[7m%s | %dx%d | %d/%d\033[0m\n",
+			filepath.Base(files[currentIndex]), imgW, imgH, currentIndex+1, len(files))
+		fmt.Println("\033[33m←/→: prev/next | q: quit\033[0m")
 	}
 
 	showImage()
@@ -529,20 +530,6 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 				currentIndex--
 				showImage()
 			}
-		case '+', '=':
-			zoom += 0.25
-			showImage()
-		case '-':
-			if zoom > 0.25 {
-				zoom -= 0.25
-				showImage()
-			}
-		case '0':
-			zoom = 1.0
-			showImage()
-		case '?':
-			showQRCode()
-			showImage()
 		}
 	}
 }
