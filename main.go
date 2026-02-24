@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"image"
+	"image/color"
 	"image/png"
 	"log"
 	"math"
@@ -17,7 +18,7 @@ import (
 	"golang.org/x/term"
 )
 
-const DEFAULT_VERSION = "0.5.0"
+const DEFAULT_VERSION = "x.x.x"
 
 var buildSource = "local" // go build -ldflags "-X main.buildSource=release"
 
@@ -29,6 +30,7 @@ var (
 	version               = DEFAULT_VERSION
 	showVersion           bool
 	fit                   bool
+	dither                bool
 )
 
 // ImageRenderer holds rendering options
@@ -39,6 +41,7 @@ type ImageRenderer struct {
 	char          string
 	rotate        int
 	asciiChars    string
+	dither        bool
 }
 
 // rgbTo256 converts RGB to 256-color terminal code
@@ -47,6 +50,77 @@ func rgbTo256(r, g, b uint8) int {
 	g6 := int(float64(g) * 5 / 255)
 	b6 := int(float64(b) * 5 / 255)
 	return 16 + 36*r6 + 6*g6 + b6
+}
+
+func applyFloydSteinberg(img image.Image) image.Image {
+	bounds := img.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+
+	errR := make([][]float64, h)
+	errG := make([][]float64, h)
+	errB := make([][]float64, h)
+	for i := 0; i < h; i++ {
+		errR[i] = make([]float64, w+2)
+		errG[i] = make([]float64, w+2)
+		errB[i] = make([]float64, w+2)
+	}
+
+	newImg := image.NewRGBA(bounds)
+
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			r, g, b, a := img.At(x+bounds.Min.X, y+bounds.Min.Y).RGBA()
+
+			oldR := float64(r>>8) + errR[y][x]
+			oldG := float64(g>>8) + errG[y][x]
+			oldB := float64(b>>8) + errB[y][x]
+
+			if oldR > 255 {
+				oldR = 255
+			}
+			if oldG > 255 {
+				oldG = 255
+			}
+			if oldB > 255 {
+				oldB = 255
+			}
+
+			newR := uint8(oldR)
+			newG := uint8(oldG)
+			newB := uint8(oldB)
+
+			newImg.Set(x+bounds.Min.X, y+bounds.Min.Y, color.RGBA{
+				R: newR, G: newG, B: newB, A: uint8(a >> 8),
+			})
+
+			errR[y][x] = oldR - float64(newR)
+			errG[y][x] = oldG - float64(newG)
+			errB[y][x] = oldB - float64(newB)
+
+			if x+1 < w {
+				errR[y][x+1] += errR[y][x] * 7 / 16
+				errG[y][x+1] += errG[y][x] * 7 / 16
+				errB[y][x+1] += errB[y][x] * 7 / 16
+			}
+			if y+1 < h {
+				if x > 0 {
+					errR[y+1][x-1] += errR[y][x] * 3 / 16
+					errG[y+1][x-1] += errG[y][x] * 3 / 16
+					errB[y+1][x-1] += errB[y][x] * 3 / 16
+				}
+				errR[y+1][x] += errR[y][x] * 5 / 16
+				errG[y+1][x] += errG[y][x] * 5 / 16
+				errB[y+1][x] += errB[y][x] * 5 / 16
+				if x+1 < w {
+					errR[y+1][x+1] += errR[y][x] * 1 / 16
+					errG[y+1][x+1] += errG[y][x] * 1 / 16
+					errB[y+1][x+1] += errB[y][x] * 1 / 16
+				}
+			}
+		}
+	}
+
+	return newImg
 }
 
 // calculateSize computes width/height automatically
@@ -168,6 +242,11 @@ func printTGPKitty(data string) {
 // renderTerminal returns terminal representation lines
 func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 	img = rotateImage(img, r.rotate)
+
+	if r.dither {
+		img = applyFloydSteinberg(img)
+	}
+
 	resized := imaging.Resize(img, r.width, r.height*2, imaging.Lanczos)
 	bounds := resized.Bounds()
 	lines := make([]string, 0, bounds.Dy()/2)
@@ -202,9 +281,8 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 				grayBottom := 0.299*float64(br8) + 0.587*float64(bg8) + 0.114*float64(bb8)
 				avgGray := (grayTop + grayBottom) / 2
 
-				// asciiChars := "@#%*+=-:. "
 				chars := r.asciiChars
-				if r.char != "" {
+				if r.char != "" && r.char != "▀" {
 					chars = r.char
 				}
 
@@ -354,6 +432,7 @@ func main() {
 				char:       char,
 				rotate:     rotate,
 				asciiChars: ascii,
+				dither:     dither,
 			}
 
 			for _, line := range renderer.renderTerminal(img) {
@@ -374,6 +453,7 @@ func main() {
 	rootCmd.Flags().StringVarP(&char, "char", "c", "▀", "Block character to use")
 	rootCmd.Flags().IntVarP(&rotate, "rotate", "r", 0, "Rotate: 90,180,270")
 	rootCmd.Flags().BoolVarP(&fit, "fit", "f", false, "Fit to terminal size")
+	rootCmd.Flags().BoolVarP(&dither, "dither", "d", false, "Apply Floyd-Steinberg dithering")
 	rootCmd.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "Show version and exit")
 
 	applyEnvDefaults() // apply default values from environment variables
