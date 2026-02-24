@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/disintegration/imaging"
@@ -397,15 +398,22 @@ func applyEnvDefaults() {
 }
 
 func runInteractiveMode(args []string, mode string, invert bool, rotate int, char string, width int, height int) {
+	imageExtensions := map[string]bool{
+		".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".bmp": true, ".webp": true,
+	}
+
 	files := args
 	if len(files) == 1 {
 		if isDir, _ := pathExists(files[0]); isDir {
-			entries, _ := os.ReadDir(files[0])
-			files = nil
 			dirPath := files[0]
+			entries, _ := os.ReadDir(dirPath)
+			files = nil
 			for _, e := range entries {
 				if !e.IsDir() {
-					files = append(files, filepath.Join(dirPath, e.Name()))
+					ext := strings.ToLower(filepath.Ext(e.Name()))
+					if imageExtensions[ext] {
+						files = append(files, filepath.Join(dirPath, e.Name()))
+					}
 				}
 			}
 		}
