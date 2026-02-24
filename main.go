@@ -396,7 +396,7 @@ func applyEnvDefaults() {
 	}
 }
 
-func runInteractiveMode(args []string, mode string, invert bool, rotate int, char string) {
+func runInteractiveMode(args []string, mode string, invert bool, rotate int, char string, width int, height int) {
 	files := args
 	if len(files) == 1 {
 		if isDir, _ := pathExists(files[0]); isDir {
@@ -438,6 +438,40 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 		imgW := bounds.Dx()
 		imgH := bounds.Dy()
 
+		if mode == "tgp" {
+			displayW := width
+			displayH := height
+
+			if displayW == 0 && displayH == 0 {
+				if imgW <= termW && imgH <= termH-4 {
+					displayW = imgW
+					displayH = imgH
+				} else if imgW > termW {
+					displayW = termW
+					displayH = int(math.Round(float64(imgH) * float64(displayW) / float64(imgW)))
+					if displayH > termH-4 {
+						displayH = termH - 4
+						displayW = int(math.Round(float64(imgW) * float64(displayH) / float64(imgH)))
+					}
+				} else if imgH > termH-4 {
+					displayH = termH - 4
+					displayW = int(math.Round(float64(imgW) * float64(displayH) / float64(imgH)))
+				}
+			} else if displayW > 0 && displayH == 0 && imgW > 0 {
+				displayH = int(math.Round(float64(imgH) * float64(displayW) / float64(imgW)))
+			} else if displayH > 0 && displayW == 0 && imgH > 0 {
+				displayW = int(math.Round(float64(imgW) * float64(displayH) / float64(imgH)))
+			}
+
+			resized := imaging.Resize(img, displayW, displayH, imaging.Lanczos)
+			printTGPKittyFromImage(resized)
+
+			fmt.Printf("\r\033[%dH\033[7m%s | %dx%d | TGP | %d/%d\033[0m\n",
+				displayH+4, filepath.Base(files[currentIndex]), imgW, imgH, currentIndex+1, len(files))
+			fmt.Printf("\033[%dH\033[33m←/→: prev/next | ESC/Ctrl+C: quit\033[0m\n", displayH+5)
+			return
+		}
+
 		displayW := termW
 		displayH := termW * imgH / imgW / 2
 
@@ -448,6 +482,7 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 
 		resized := imaging.Resize(img, displayW, displayH, imaging.Lanczos)
 		bounds = resized.Bounds()
+		dispH := bounds.Dy()
 
 		for y := bounds.Min.Y; y < bounds.Max.Y; y += 2 {
 			fmt.Print("\r")
@@ -472,9 +507,9 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 		}
 
 		fmt.Print("\r")
-		fmt.Printf("\033[7m%s | %dx%d | %d/%d\033[0m\n",
-			filepath.Base(files[currentIndex]), imgW, imgH, currentIndex+1, len(files))
-		fmt.Println("\033[33m←/→: prev/next | q: quit\033[0m")
+		fmt.Printf("\033[%dH\033[7m%s | %dx%d | ASCII | %d/%d\033[0m\n",
+			dispH/2+4, filepath.Base(files[currentIndex]), imgW, imgH, currentIndex+1, len(files))
+		fmt.Printf("\033[%dH\033[33m←/→: prev/next | ESC/Ctrl+C: quit\033[0m\n", dispH/2+5)
 	}
 
 	showImage()
@@ -500,8 +535,12 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 			continue
 		}
 
-		if buf[0] == 27 && n >= 3 {
-			if buf[1] == 91 {
+		if buf[0] == 27 {
+			if n == 1 {
+				fmt.Print("\033[2J\033[H")
+				return
+			}
+			if n >= 3 && buf[1] == 91 {
 				switch buf[2] {
 				case 67:
 					if currentIndex < len(files)-1 {
@@ -516,6 +555,11 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 				}
 			}
 			continue
+		}
+
+		if buf[0] == 3 {
+			fmt.Print("\033[2J\033[H")
+			return
 		}
 
 		switch buf[0] {
@@ -568,6 +612,8 @@ func showQRCode() {
 }
 
 func printTGPKittyFromImage(img image.Image) {
+	fmt.Print("\033[3;H")
+
 	buf := new(bytes.Buffer)
 	png.Encode(buf, img)
 	data := base64.StdEncoding.EncodeToString(buf.Bytes())
@@ -628,7 +674,7 @@ func main() {
 			}
 
 			if interactive {
-				runInteractiveMode(args, mode, invert, rotate, char)
+				runInteractiveMode(args, mode, invert, rotate, char, width, height)
 				return
 			}
 
@@ -642,10 +688,10 @@ func main() {
 				log.Fatalf("Invalid rotate value: %d (must be 0, 90, 180, or 270)", rotate)
 			}
 
-			if fit {
-				if tw, _ := getTerminalSize(); tw > 0 {
+			if fit || (mode == "tgp" && width == 0 && height == 0) {
+				if tw, th := getTerminalSize(); tw > 0 {
 					width = tw
-					height = 0
+					height = th - 4
 				}
 			}
 
