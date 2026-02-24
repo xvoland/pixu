@@ -429,7 +429,7 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 	showImage := func() {
 		termW, termH := getTerminalSize()
 
-		fmt.Print("\033[2J")
+		fmt.Print("\033[1;0H\033[J")
 
 		img, err := imaging.Open(files[currentIndex], imaging.AutoOrientation(true))
 		if err != nil {
@@ -484,9 +484,11 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 			displayW = displayH * 2 * imgW / imgH
 		}
 
-		resized := imaging.Resize(img, displayW, displayH, imaging.Lanczos)
+		resized := imaging.Resize(img, displayW, displayH*2, imaging.Lanczos)
 		bounds = resized.Bounds()
-		dispH := bounds.Dy()
+		dispH := bounds.Dy() / 2
+
+		fmt.Print("\033[1;0H")
 
 		for y := bounds.Min.Y; y < bounds.Max.Y; y += 2 {
 			fmt.Print("\r")
@@ -512,8 +514,8 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 
 		fmt.Print("\r")
 		fmt.Printf("\033[%dH\033[7m%s | %dx%d | ASCII | %d/%d\033[0m\n",
-			dispH+3, filepath.Base(files[currentIndex]), imgW, imgH, currentIndex+1, len(files))
-		fmt.Printf("\033[%dH\033[33m←/→: prev/next | ESC/Ctrl+C: quit\033[0m\n", dispH+4)
+			dispH+1, filepath.Base(files[currentIndex]), imgW, imgH, currentIndex+1, len(files))
+		fmt.Printf("\033[%dH\033[33m←/→: prev/next | ESC/Ctrl+C: quit\033[0m\n", dispH+2)
 	}
 
 	showImage()
