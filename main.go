@@ -16,13 +16,18 @@ import (
 	"golang.org/x/term"
 )
 
+const DEFAULT_VERSION = "0.5.0"
+
+var buildSource = "local" // go build -ldflags "-X main.buildSource=release"
+
 var (
 	width, height, rotate int
 	mode                  string
 	invert                bool
 	char                  string
-	version               = "0.5.0"
+	version               = DEFAULT_VERSION
 	showVersion           bool
+	fit                   bool
 )
 
 // ImageRenderer holds rendering options
@@ -48,6 +53,10 @@ func calculateSize(img image.Image, width, height int, isTGP bool) (int, int) {
 	imgW := img.Bounds().Dx()
 	imgH := img.Bounds().Dy()
 
+	if imgW == 0 || imgH == 0 {
+		return width, height
+	}
+
 	if width > 0 && height == 0 {
 		if isTGP {
 			height = int(math.Round(float64(imgH) * float64(width) / float64(imgW)))
@@ -71,6 +80,18 @@ func calculateSize(img image.Image, width, height int, isTGP bool) (int, int) {
 	return width, height
 }
 
+func getTerminalSize() (int, int) {
+	fd := int(os.Stdout.Fd())
+	if !term.IsTerminal(fd) {
+		return 0, 0
+	}
+	w, h, err := term.GetSize(fd)
+	if err != nil {
+		return 0, 0
+	}
+	return w, h
+}
+
 // rotateImage rotates the image by degrees
 func rotateImage(img image.Image, degrees int) image.Image {
 	switch degrees {
@@ -91,17 +112,8 @@ const chunkSize = 4096
 func printTGP(img image.Image, width, height int, rotate int, invert bool) {
 	term := os.Getenv("TERM_PROGRAM")
 
-	// Rotate the image according to the specified angle
-	switch rotate {
-	case 90:
-		img = imaging.Rotate90(img)
-	case 180:
-		img = imaging.Rotate180(img)
-	case 270:
-		img = imaging.Rotate270(img)
-	}
+	img = rotateImage(img, rotate)
 
-	// Invert the image colors if invert flag is true
 	if invert {
 		img = imaging.Invert(img)
 	}
@@ -122,36 +134,34 @@ func printTGP(img image.Image, width, height int, rotate int, invert bool) {
 
 	switch term {
 	case "iTerm.app":
-		// iTerm2 inline image protocol
-		// \033]1337;File=... sends image inline in iTerm2
 		fmt.Printf("\033]1337;File=name=inline.png;width=auto;height=auto;inline=1:%s\a\n", data)
+	case "Ghostty", "WezTerm":
+		printTGPKitty(data)
 	default:
-		// Kitty / Ghostty graphics protocol
-		// Split base64 data into chunks to comply with terminal buffer limits
-		for i := 0; i < len(data); i += chunkSize {
-			end := i + chunkSize
-			if end > len(data) {
-				end = len(data)
-			}
-			chunk := data[i:end]
-
-			// more=1 indicates that there are more chunks to follow
-			more := 0
-			if end < len(data) {
-				more = 1
-			}
-
-			if i == 0 {
-				// First chunk includes full parameters (action, format, type)
-				fmt.Printf("\033_Ga=T,f=100,t=d,m=%d;%s\033\\", more, chunk)
-			} else {
-				// Subsequent chunks only include 'more' parameter
-				fmt.Printf("\033_Gm=%d;%s\033\\", more, chunk)
-			}
-		}
-		// Print newline to clean up terminal output (avoid leftover characters like '%')
-		fmt.Print("\n")
+		printTGPKitty(data)
 	}
+}
+
+func printTGPKitty(data string) {
+	for i := 0; i < len(data); i += chunkSize {
+		end := i + chunkSize
+		if end > len(data) {
+			end = len(data)
+		}
+		chunk := data[i:end]
+
+		more := 0
+		if end < len(data) {
+			more = 1
+		}
+
+		if i == 0 {
+			fmt.Printf("\033_Ga=T,f=100,t=d,m=%d;%s\033\\", more, chunk)
+		} else {
+			fmt.Printf("\033_Gm=%d;%s\033\\", more, chunk)
+		}
+	}
+	fmt.Print("\n")
 }
 
 // renderTerminal returns terminal representation lines
@@ -180,6 +190,11 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 				br8, bg8, bb8 = 255-br8, 255-bg8, 255-bb8
 			}
 
+			charToUse := r.char
+			if charToUse == "" {
+				charToUse = "▀"
+			}
+
 			switch r.mode {
 			case "ascii":
 				grayTop := 0.299*float64(tr8) + 0.587*float64(tg8) + 0.114*float64(tb8)
@@ -203,21 +218,22 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 				}
 				line += string(runes[index])
 			case "256":
-				line += fmt.Sprintf("\033[38;5;%d;48;5;%dm▀",
+				line += fmt.Sprintf("\033[38;5;%d;48;5;%dm%s",
 					rgbTo256(tr8, tg8, tb8),
-					rgbTo256(br8, bg8, bb8))
+					rgbTo256(br8, bg8, bb8),
+					charToUse)
 			case "grayscale":
 				grayTop := uint8(0.299*float64(tr8) + 0.587*float64(tg8) + 0.114*float64(tb8))
 				grayBottom := uint8(0.299*float64(br8) + 0.587*float64(bg8) + 0.114*float64(bb8))
 				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s",
 					grayTop, grayTop, grayTop,
 					grayBottom, grayBottom, grayBottom,
-					r.char)
+					charToUse)
 			default: // rgb
 				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s",
 					tr8, tg8, tb8,
 					br8, bg8, bb8,
-					r.char)
+					charToUse)
 			}
 		}
 
@@ -282,6 +298,7 @@ func applyEnvDefaults() {
 }
 
 func main() {
+
 	rootCmd := &cobra.Command{
 		Use:   "pixu",
 		Short: "PIXU: ANSI and TGP render images in terminal",
@@ -302,6 +319,17 @@ func main() {
 			img, err := imaging.Open(imgPath, imaging.AutoOrientation(true))
 			if err != nil {
 				log.Fatalf("Error loading image: %v", err)
+			}
+
+			if rotate != 0 && rotate != 90 && rotate != 180 && rotate != 270 {
+				log.Fatalf("Invalid rotate value: %d (must be 0, 90, 180, or 270)", rotate)
+			}
+
+			if fit {
+				if tw, _ := getTerminalSize(); tw > 0 {
+					width = tw
+					height = 0
+				}
 			}
 
 			scaleWidth, scaleHeight := calculateSize(img, width, height, mode == "tgp")
@@ -343,6 +371,7 @@ func main() {
 	rootCmd.Flags().BoolVarP(&invert, "invert", "i", false, "Invert colors")
 	rootCmd.Flags().StringVarP(&char, "char", "c", "▀", "Block character to use")
 	rootCmd.Flags().IntVarP(&rotate, "rotate", "r", 0, "Rotate: 90,180,270")
+	rootCmd.Flags().BoolVarP(&fit, "fit", "f", false, "Fit to terminal size")
 	rootCmd.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "Show version and exit")
 
 	applyEnvDefaults() // apply default values from environment variables
