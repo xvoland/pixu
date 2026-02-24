@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	_ "image/jpeg"
 	"image/png"
 	"log"
 	"math"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -20,7 +22,19 @@ import (
 
 const DEFAULT_VERSION = "x.x.x"
 
-var buildSource = "local" // go build -ldflags "-X main.buildSource=release"
+var qrCodeText = "Scan to support PIXU!\nhttps://paypal.me/xvoland\n"
+
+var buildSource = "local"
+
+var qrCodeBase64 = ""
+
+var qrCodeData []byte
+
+func init() {
+	if qrCodeBase64 != "" {
+		qrCodeData, _ = base64.StdEncoding.DecodeString(qrCodeBase64)
+	}
+}
 
 var (
 	width, height, rotate int
@@ -31,6 +45,8 @@ var (
 	showVersion           bool
 	fit                   bool
 	dither                bool
+	interactive           bool
+	qr                    bool
 )
 
 // ImageRenderer holds rendering options
@@ -158,11 +174,14 @@ func calculateSize(img image.Image, width, height int, isTGP bool) (int, int) {
 func getTerminalSize() (int, int) {
 	fd := int(os.Stdout.Fd())
 	if !term.IsTerminal(fd) {
-		return 0, 0
+		if tty, err := os.Open("/dev/tty"); err == nil {
+			fd = int(tty.Fd())
+			tty.Close()
+		}
 	}
 	w, h, err := term.GetSize(fd)
 	if err != nil {
-		return 0, 0
+		return 80, 24
 	}
 	return w, h
 }
@@ -377,12 +396,231 @@ func applyEnvDefaults() {
 	}
 }
 
+func runInteractiveMode(args []string, mode string, invert bool, rotate int, char string) {
+	files := args
+	if len(files) == 1 {
+		if isDir, _ := pathExists(files[0]); isDir {
+			entries, _ := os.ReadDir(files[0])
+			files = nil
+			dirPath := files[0]
+			for _, e := range entries {
+				if !e.IsDir() {
+					files = append(files, filepath.Join(dirPath, e.Name()))
+				}
+			}
+		}
+	}
+
+	if len(files) == 0 {
+		fmt.Println("No images found")
+		return
+	}
+
+	currentIndex := 0
+	zoom := 1.0
+	termW, termH := getTerminalSize()
+
+	showImage := func() {
+		fmt.Print("\033[2J\033[H")
+
+		img, err := imaging.Open(files[currentIndex], imaging.AutoOrientation(true))
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			return
+		}
+
+		img = rotateImage(img, rotate)
+		if invert {
+			img = imaging.Invert(img)
+		}
+
+		bounds := img.Bounds()
+		imgW := bounds.Dx()
+		imgH := bounds.Dy()
+
+		displayW := int(float64(termW) * zoom)
+		displayH := int(float64(displayW) * float64(imgH) / float64(imgW) / 2)
+
+		if displayH > int(float64(termH-3)*zoom) {
+			displayH = int(float64(termH-3) * zoom)
+			displayW = int(float64(displayH) * 2 * float64(imgW) / float64(imgH))
+		}
+
+		resized := imaging.Resize(img, displayW, displayH, imaging.Lanczos)
+		bounds = resized.Bounds()
+
+		for y := bounds.Min.Y; y < bounds.Max.Y; y += 2 {
+			line := ""
+			for x := bounds.Min.X; x < bounds.Max.X; x++ {
+				topColor := resized.At(x, y)
+				bottomColor := topColor
+				if y+1 < bounds.Max.Y {
+					bottomColor = resized.At(x, y+1)
+				}
+
+				tr, tg, tb, _ := topColor.RGBA()
+				br, bg, bb, _ := bottomColor.RGBA()
+				tr8, tg8, tb8 := uint8(tr>>8), uint8(tg>>8), uint8(tb>>8)
+				br8, bg8, bb8 := uint8(br>>8), uint8(bg>>8), uint8(bb>>8)
+
+				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm▀\033[0m",
+					tr8, tg8, tb8, br8, bg8, bb8)
+			}
+			fmt.Println(line)
+		}
+
+		fmt.Printf("\033[7m%s | %dx%d | Zoom: %.1fx | %d/%d\033[0m\n",
+			filepath.Base(files[currentIndex]), imgW, imgH, zoom, currentIndex+1, len(files))
+		fmt.Println("\033[33m←/→: prev/next | +/-: zoom | 0: reset | ?: QR | q: quit\033[0m")
+	}
+
+	showImage()
+
+	tty, err := os.Open("/dev/tty")
+	if err != nil {
+		fmt.Println("Error: cannot open /dev/tty for input")
+		return
+	}
+	defer tty.Close()
+
+	oldState, err := term.MakeRaw(int(tty.Fd()))
+	if err != nil {
+		fmt.Println("Error: cannot set raw mode")
+		return
+	}
+	defer term.Restore(int(tty.Fd()), oldState)
+
+	for {
+		buf := make([]byte, 10)
+		n, err := tty.Read(buf)
+		if err != nil || n == 0 {
+			continue
+		}
+
+		if buf[0] == 27 && n >= 3 {
+			if buf[1] == 91 {
+				switch buf[2] {
+				case 67:
+					if currentIndex < len(files)-1 {
+						currentIndex++
+						showImage()
+					}
+				case 68:
+					if currentIndex > 0 {
+						currentIndex--
+						showImage()
+					}
+				}
+			}
+			continue
+		}
+
+		switch buf[0] {
+		case 'q', 'Q':
+			fmt.Print("\033[2J\033[H")
+			return
+		case 'n', 'N', 14:
+			if currentIndex < len(files)-1 {
+				currentIndex++
+				showImage()
+			}
+		case 'p', 'P', 16:
+			if currentIndex > 0 {
+				currentIndex--
+				showImage()
+			}
+		case '+', '=':
+			zoom += 0.25
+			showImage()
+		case '-':
+			if zoom > 0.25 {
+				zoom -= 0.25
+				showImage()
+			}
+		case '0':
+			zoom = 1.0
+			showImage()
+		case '?':
+			showQRCode()
+			showImage()
+		}
+	}
+}
+
+func showQRCode() {
+	img, err := imaging.Decode(bytes.NewReader(qrCodeData), imaging.AutoOrientation(true))
+	if err != nil {
+		fmt.Println("Error decoding QR:", err)
+		return
+	}
+
+	bounds := img.Bounds()
+	displayW := bounds.Dx()
+	displayH := bounds.Dy()
+
+	resized := imaging.Resize(img, displayW, displayH, imaging.Lanczos)
+
+	term := os.Getenv("TERM_PROGRAM")
+
+	switch term {
+	case "iTerm.app":
+		buf := new(bytes.Buffer)
+		png.Encode(buf, resized)
+		data := base64.StdEncoding.EncodeToString(buf.Bytes())
+		fmt.Printf("\033]1337;File=name=qr.png;width=auto;height=auto;inline=1:%s\a\n", data)
+	default:
+		printTGPKittyFromImage(resized)
+	}
+
+	if qrCodeText != "" {
+		fmt.Println()
+		fmt.Println(qrCodeText)
+	}
+}
+
+func printTGPKittyFromImage(img image.Image) {
+	buf := new(bytes.Buffer)
+	png.Encode(buf, img)
+	data := base64.StdEncoding.EncodeToString(buf.Bytes())
+
+	for i := 0; i < len(data); i += chunkSize {
+		end := i + chunkSize
+		if end > len(data) {
+			end = len(data)
+		}
+		chunk := data[i:end]
+
+		more := 0
+		if end < len(data) {
+			more = 1
+		}
+
+		if i == 0 {
+			fmt.Printf("\033_Ga=T,f=100,t=d,m=%d;%s\033\\", more, chunk)
+		} else {
+			fmt.Printf("\033_Gm=%d;%s\033\\", more, chunk)
+		}
+	}
+	fmt.Print("\n")
+}
+
+func pathExists(path string) (bool, error) {
+	info, err := os.Stat(path)
+	if err == nil {
+		return info.IsDir(), nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
+}
+
 func main() {
 
 	rootCmd := &cobra.Command{
 		Use:   "pixu",
 		Short: "PIXU: ANSI and TGP render images in terminal",
-		Args:  cobra.MaximumNArgs(1),
+		Args:  cobra.ArbitraryArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			if showVersion {
 				fmt.Println("pixu", version)
@@ -390,8 +628,18 @@ func main() {
 				return
 			}
 
+			if qr {
+				showQRCode()
+				return
+			}
+
 			if len(args) == 0 {
 				cmd.Help()
+				return
+			}
+
+			if interactive {
+				runInteractiveMode(args, mode, invert, rotate, char)
 				return
 			}
 
@@ -454,6 +702,8 @@ func main() {
 	rootCmd.Flags().IntVarP(&rotate, "rotate", "r", 0, "Rotate: 90,180,270")
 	rootCmd.Flags().BoolVarP(&fit, "fit", "f", false, "Fit to terminal size")
 	rootCmd.Flags().BoolVarP(&dither, "dither", "d", false, "Apply Floyd-Steinberg dithering")
+	rootCmd.Flags().BoolVarP(&interactive, "interactive", "I", false, "Interactive mode with navigation and zoom")
+	rootCmd.Flags().BoolVarP(&qr, "qr", "", false, "Show QR code for donation")
 	rootCmd.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "Show version and exit")
 
 	applyEnvDefaults() // apply default values from environment variables

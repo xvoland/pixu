@@ -7,11 +7,13 @@ BIN_DIR := bin
 VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "dev")
 BUILD_SOURCE := $(shell git describe --tags 2>/dev/null || echo "local")
 
+QR_CODE_BASE64 := $(shell base64 -i qr-code.jpg | tr -d '\n')
+
 PLATFORMS := windows/amd64 linux/amd64 darwin/amd64 linux/arm64 linux/arm
 
-LDFLAGS := -X main.version=$(VERSION) -X main.buildSource=$(BUILD_SOURCE)
+LDFLAGS := -X main.version=$(VERSION) -X main.buildSource=$(BUILD_SOURCE) -X main.qrCodeBase64=$(QR_CODE_BASE64)
 
-.PHONY: all clean build build-local
+.PHONY: all clean build build-local qr
 
 all: clean build
 
@@ -32,3 +34,8 @@ build:
 
 clean:
 	@rm -rf $(BIN_DIR)
+
+.PHONY: qr
+
+qr:
+	@./pixu --qr
