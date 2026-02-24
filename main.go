@@ -669,6 +669,10 @@ func main() {
 				return
 			}
 
+			if interactive && (mode == "" || mode == "rgb") {
+				mode = "tgp"
+			}
+
 			if interactive {
 				runInteractiveMode(args, mode, invert, rotate, char, width, height)
 				return
