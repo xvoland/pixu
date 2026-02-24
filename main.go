@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/disintegration/imaging"
 	"github.com/spf13/cobra"
@@ -254,12 +255,13 @@ func createLink(url, text string) string {
 }
 
 func printCopyleft() {
+	year := time.Now().Year()
 	fmt.Println("")
 	fmt.Println("Homepage: ", createLink("https://dotoca.net/pixu", "https://dotoca.net/pixu"))
 	fmt.Println("Youtube:  ", createLink("https://youtube.com/@xvoland", "https://youtube.com/@xvoland"))
 	fmt.Println("Donation: ", createLink("https://paypal.me/xvoland", "https://paypal.me/xvoland"))
-	fmt.Println("Copyright © 2025, Vitalii Tereshchuk | URL:",
-		createLink("https://dotoca.net", "DOTOCA.NET"))
+	fmt.Printf("Copyright © %d, Vitalii Tereshchuk | URL: %s\n",
+		year, createLink("https://dotoca.net", "DOTOCA.NET"))
 
 }
 

@@ -4,12 +4,20 @@ APP_NAME := pixu
 SRC := main.go
 BIN_DIR := bin
 
-# Platforms: OS/ARCH
+VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "dev")
+BUILD_SOURCE := $(shell git describe --tags 2>/dev/null || echo "local")
+
 PLATFORMS := windows/amd64 linux/amd64 darwin/amd64 linux/arm64 linux/arm
 
-.PHONY: all clean build
+LDFLAGS := -X main.version=$(VERSION) -X main.buildSource=$(BUILD_SOURCE)
+
+.PHONY: all clean build build-local
 
 all: clean build
+
+build-local:
+	@echo "Building $(APP_NAME) $(VERSION)..."
+	@go build -ldflags "$(LDFLAGS)" -o $(APP_NAME) $(SRC)
 
 build:
 	@mkdir -p $(BIN_DIR)
@@ -18,8 +26,8 @@ build:
 		ARCH=$${platform#*/}; \
 		OUT=$(BIN_DIR)/$(APP_NAME)-$${OS}-$${ARCH}; \
 		if [ "$${OS}" = "windows" ]; then OUT=$${OUT}.exe; fi; \
-		echo "Building $$OUT..."; \
-		CGO_ENABLED=0 GOOS=$${OS} GOARCH=$${ARCH} go build -o $$OUT $(SRC); \
+		echo "Building $$OUT ($(VERSION))..."; \
+		CGO_ENABLED=0 GOOS=$${OS} GOARCH=$${ARCH} go build -ldflags "$(LDFLAGS)" -o $$OUT $(SRC); \
 	done
 
 clean:
