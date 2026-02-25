@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	_ "image/gif"
 	_ "image/jpeg"
 	"image/png"
+	"io"
 	"log"
 	"math"
 	"os"
@@ -48,6 +50,7 @@ var (
 	dither                bool
 	interactive           bool
 	qr                    bool
+	input                 string
 )
 
 // ImageRenderer holds rendering options
@@ -674,11 +677,6 @@ func main() {
 				return
 			}
 
-			if len(args) == 0 {
-				cmd.Help()
-				return
-			}
-
 			if interactive && (mode == "" || mode == "rgb") {
 				mode = "tgp"
 			}
@@ -688,29 +686,83 @@ func main() {
 				return
 			}
 
-			imgPath := args[0]
-			img, err := imaging.Open(imgPath, imaging.AutoOrientation(true))
-			if err != nil {
-				log.Fatalf("Error loading image: %v", err)
+			var img image.Image
+			var err error
+
+			if input != "" {
+				var data []byte
+
+				if input == "-" {
+					data, err = io.ReadAll(os.Stdin)
+				} else {
+					data, err = os.ReadFile(input)
+				}
+				if err != nil {
+					log.Fatalf("Error reading input: %v", err)
+				}
+				img, _, err = image.Decode(bytes.NewReader(data))
+				if err != nil {
+					log.Fatalf("Error decoding image: %v", err)
+				}
+			} else if len(args) > 0 && args[0] == "-" {
+				data, err := io.ReadAll(os.Stdin)
+				if err != nil {
+					log.Fatalf("Error reading stdin: %v", err)
+				}
+				img, _, err = image.Decode(bytes.NewReader(data))
+				if err != nil {
+					log.Fatalf("Error decoding image from stdin: %v", err)
+				}
+			} else if len(args) == 0 {
+				cmd.Help()
+				return
+			} else {
+				img, err = imaging.Open(args[0], imaging.AutoOrientation(true))
+				if err != nil {
+					log.Fatalf("Error loading image: %v", err)
+				}
 			}
 
 			if rotate != 0 && rotate != 90 && rotate != 180 && rotate != 270 {
 				log.Fatalf("Invalid rotate value: %d (must be 0, 90, 180, or 270)", rotate)
 			}
 
-			if fit || (mode == "tgp" && width == 0 && height == 0) {
+			if mode == "tgp" {
+				termW, termH := getTerminalSize()
+				imgH := img.Bounds().Dy()
+				imgW := img.Bounds().Dx()
+
+				if width == 0 && height == 0 {
+					width = termW * 10
+					height = int(math.Round(float64(imgH) * float64(width) / float64(imgW)))
+					if height > (termH-4)*20 {
+						height = (termH - 4) * 20
+						width = int(math.Round(float64(imgW) * float64(height) / float64(imgH)))
+					}
+				} else if width > 0 && height == 0 {
+					width = width * 10
+					if imgW > 0 {
+						height = int(math.Round(float64(imgH) * float64(width) / float64(imgW)))
+					}
+				} else if height > 0 && width == 0 {
+					height = height * 20
+					if imgH > 0 {
+						width = int(math.Round(float64(imgW) * float64(height) / float64(imgH)))
+					}
+				}
+
+				printTGP(img, width, height, rotate, invert)
+				return
+			}
+
+			if fit {
 				if tw, th := getTerminalSize(); tw > 0 {
 					width = tw
 					height = th - 4
 				}
 			}
 
-			scaleWidth, scaleHeight := calculateSize(img, width, height, mode == "tgp")
-
-			if mode == "tgp" {
-				printTGP(img, scaleWidth, scaleHeight, rotate, invert)
-				return
-			}
+			scaleWidth, scaleHeight := calculateSize(img, width, height, false)
 
 			ascii := os.Getenv("PIXU_ASCII_CHARS")
 			if ascii == "" {
@@ -749,6 +801,7 @@ func main() {
 	rootCmd.Flags().BoolVarP(&dither, "dither", "d", false, "Apply Floyd-Steinberg dithering")
 	rootCmd.Flags().BoolVarP(&interactive, "interactive", "I", false, "Interactive mode with navigation and zoom")
 	rootCmd.Flags().BoolVarP(&qr, "qr", "", false, "Show QR code for donation")
+	rootCmd.Flags().StringVar(&input, "input", "", "Input file (use - for stdin)")
 	rootCmd.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "Show version and exit")
 
 	applyEnvDefaults() // apply default values from environment variables
