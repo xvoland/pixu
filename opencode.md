@@ -21299,3 +21299,399 @@ git commit -m "Add TGP pixel sizing and stdin support"
 
 Короткий коммит предпочтительнее для понятной истории.
 
+## User
+
+Вернемся и обсудим план
+
+## Assistant
+
+<thinking>
+The user wants to discuss the plan. They are in plan mode - meaning I should not make any edits, just discuss and plan.
+
+Let me ask what they want to discuss or what plan they want to review.
+</thinking>
+
+О чём хочешь обсудить? Какие есть вопросы или что-то нужно уточнить?
+
+## User
+
+Можешь описать для страницы github весь функционал и как использовать, для чего нужна такая утилита и т.д.
+
+## Assistant
+
+<thinking>
+The user wants me to write documentation for the GitHub page describing the functionality, usage, and purpose of the pixu utility. I need to describe what the tool does comprehensively.
+
+Let me first look at the current state of the codebase to understand all the features that have been implemented.
+</thinking>
+
+**Tool Call: Check pixu help**
+Status: Completed
+
+PIXU: ANSI and TGP render images in terminal
+
+Usage:
+  pixu [flags]
+  pixu [command]
+
+Available Commands:
+  completion  Generate the autocompletion script for the specified shell
+  version     Show version
+
+Flags:
+  -c, --char string    Block character to use (default "▀")
+  -d, --dither         Apply Floyd-Steinberg dithering
+  -f, --fit            Fit to terminal size
+  -h, --height int     Height in characters
+      --help           
+      --input string   Input file (use - for stdin)
+  -I, --interactive    Interactive mode with navigation and zoom
+  -i, --invert         Invert colors
+  -m, --mode string    Mode: rgb/grayscale/ascii/tgp (default "rgb")
+      --qr             Show QR code for donation
+  -r, --rotate int     Rotate: 90,180,270
+  -v, --version        Show version and exit
+  -w, --width int      Width in characters
+
+Use "pixu [command] --help" for more information about a command.
+
+
+## Assistant
+
+<thinking>
+The user wants me to write documentation for the GitHub page describing what pixu does, how to use it, and what it's for. Let me gather all the information about pixu's functionality.
+
+Based on what I've seen:
+1. It's a CLI tool to render images in terminal
+2. Supports multiple modes: RGB, grayscale, ASCII, TGP (terminal graphics protocol)
+3. Has interactive mode with navigation
+4. Supports stdin input
+5. Has various flags for customization
+
+Let me create a comprehensive README/documentation for the GitHub page.
+</thinking>
+
+# PIXU - Terminal Image Viewer
+
+## Что такое PIXU?
+
+**PIXU** — это CLI-утилита для отображения изображений в терминале. Позволяет просматривать картинки в различных режимах: от простого ASCII-арта до полноцветного TGP (Terminal Graphics Protocol).
+
+### Зачем?
+
+- Быстрый просмотр изображений без открытия внешних программ
+- Интересный визуальный эффект в терминале
+- Удобно для скриптов и автоматизации
+- Поддержка Kitty/Ghostty/iTerm2 протоколов для красивого вывода
+
+---
+
+## Возможности
+
+### Режимы отображения
+
+| Режим | Описание |
+|-------|----------|
+| `rgb` | Полноцветный (по умолчанию) |
+| `grayscale` | Оттенки серого |
+| `ascii` | ASCII-арт (символы) |
+| `tgp` | Terminal Graphics Protocol (лучшее качество) |
+| `256` | 256 цветов |
+
+### Основные функции
+
+- **TGP (Terminal Graphics Protocol)** — нативное отображение изображений в терминалах Kitty, Ghostty, WezTerm, iTerm2
+- **Интерактивный режим** — навигация по нескольким изображениям
+- **Поддержка stdin** — принимает изображения через pipe
+- **Ресайз** — изменение размера с сохранением пропорций
+- **Поворот** — 90°, 180°, 270°
+- **Dithering** — алгоритм Флойда-Стенберга для плавных переходов
+- **QR-код** — встроенный QR для донатов
+
+---
+
+## Установка
+
+```bash
+go install github.com/xvoland/pixu@latest
+```
+
+Или собери из исходников:
+
+```bash
+git clone https://github.com/xvoland/pixu.git
+cd pixu
+go build -o pixu .
+```
+
+---
+
+## Использование
+
+### Базовое использование
+
+```bash
+# Простой вывод
+pixu image.png
+
+# Указать режим
+pixu -m tgp image.png      # TGP (лучше всего)
+pixu -m ascii image.png    # ASCII арт
+pixu -m grayscale image.png
+pixu -m 256 image.png
+
+# Изменить размер
+pixu -w 80 image.png       # ширина 80 символов
+pixu -h 40 image.png       # высота 40 строк
+pixu -f image.png          # растянуть на терминал
+```
+
+### Интерактивный режим
+
+```bash
+# Запуск (по умолчанию TGP)
+pixu -I image.png
+
+# Несколько изображений
+pixu -I *.png
+pixu -I ./images/
+
+# Управление:
+# ←/→   - следующее/предыдущее изображение
+# ESC   - выход
+# Ctrl+C - выход
+```
+
+### Stdin поддержка
+
+```bash
+# Чтение из stdin
+cat image.png | pixu -
+pixu - < image.png
+pixu --input image.png
+```
+
+### Дополнительные опции
+
+```bash
+pixu -i image.png          # инвертировать цвета
+pixu -r 90 image.png       # повернуть на 90°
+pixu -d image.png          # применить dithering
+pixu --qr                  # показать QR для доната
+pixu -v                    # версия
+```
+
+---
+
+## Примеры
+
+### TGP режим (рекомендуется)
+
+```bash
+pixu -I -m tgp photo.jpg
+```
+
+### ASCII арт
+
+```bash
+pixu -m ascii -w 60 image.png
+```
+
+### Скрипт для prewiew
+
+```bash
+#!/bin/bash
+echo "Preview:"
+pixu -m tgp "$1"
+```
+
+---
+
+## Требования
+
+- Терминал с поддержкой ANSI escape-кодов
+- Для TGP: Kitty, Ghostty, WezTerm или iTerm2
+- Go 1.20+
+
+---
+
+## Ссылки
+
+- GitHub: https://github.com/xvoland/pixu
+- Homepage: https://dotoca.net/pixu
+- YouTube: https://youtube.com/@xvoland
+
+---
+
+Хочешь, чтобы я добавил что-то ещё или изменил формулировки?
+
+## User
+
+Ты забыл упомянуть в описании интерактивный режим и форматы изображений которые поддерживаются. Также, напиши это на английском языке
+
+## Assistant
+
+<thinking>
+The user wants me to update the README to include:
+1. Interactive mode description
+2. Supported image formats
+3. Write it in English
+
+Let me write an improved version in English.
+</thinking>
+
+# PIXU - Terminal Image Viewer
+
+## What is PIXU?
+
+**PIXU** is a CLI utility for rendering images in the terminal. It allows you to view pictures in various modes: from simple ASCII art to full-color TGP (Terminal Graphics Protocol).
+
+### Why?
+
+- Quick image preview without opening external programs
+- Interesting visual effect in the terminal
+- Useful for scripts and automation
+- Support for Kitty/Ghostty/iTerm2 protocols for beautiful output
+
+---
+
+## Features
+
+### Display Modes
+
+| Mode | Description |
+|------|-------------|
+| `rgb` | Full color (default) |
+| `grayscale` | Grayscale |
+| `ascii` | ASCII art (characters) |
+| `tgp` | Terminal Graphics Protocol (best quality) |
+| `256` | 256 colors |
+
+### Key Features
+
+- **TGP (Terminal Graphics Protocol)** — native image display in Kitty, Ghostty, WezTerm, iTerm2
+- **Interactive mode** — navigate through multiple images
+- **Stdin support** — receive images via pipe
+- **Resize** — change size while maintaining aspect ratio
+- **Rotation** — 90°, 180°, 270°
+- **Dithering** — Floyd-Steinberg algorithm for smooth transitions
+- **QR-code** — built-in QR for donations
+- **Supported formats**: PNG, JPEG, GIF, BMP, WebP
+
+---
+
+## Installation
+
+```bash
+go install github.com/xvoland/pixu@latest
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/xvoland/pixu.git
+cd pixu
+go build -o pixu .
+```
+
+---
+
+## Usage
+
+### Basic Usage
+
+```bash
+# Simple output
+pixu image.png
+
+# Specify mode
+pixu -m tgp image.png      # TGP (best quality)
+pixu -m ascii image.png    # ASCII art
+pixu -m grayscale image.png
+pixu -m 256 image.png
+
+# Resize
+pixu -w 80 image.png       # width 80 characters
+pixu -h 40 image.png       # height 40 lines
+pixu -f image.png          # fit to terminal
+```
+
+### Interactive Mode
+
+```bash
+# Launch (TGP by default)
+pixu -I image.png
+
+# Multiple images
+pixu -I *.png
+pixu -I ./images/
+
+# Controls:
+# ←/→   - next/previous image
+# ESC   - exit
+# Ctrl+C - exit
+```
+
+### Stdin Support
+
+```bash
+# Read from stdin
+cat image.png | pixu -
+pixu - < image.png
+pixu --input image.png
+```
+
+### Additional Options
+
+```bash
+pixu -i image.png          # invert colors
+pixu -r 90 image.png       # rotate 90°
+pixu -d image.png          # apply dithering
+pixu --qr                  # show donation QR
+pixu -v                    # version
+```
+
+---
+
+## Examples
+
+### TGP Mode (Recommended)
+
+```bash
+pixu -I -m tgp photo.jpg
+```
+
+### ASCII Art
+
+```bash
+pixu -m ascii -w 60 image.png
+```
+
+### Preview Script
+
+```bash
+#!/bin/bash
+echo "Preview:"
+pixu -m tgp "$1"
+```
+
+---
+
+## Requirements
+
+- Terminal with ANSI escape code support
+- For TGP: Kitty, Ghostty, WezTerm or iTerm2
+- Go 1.20+
+
+---
+
+## Links
+
+- GitHub: https://github.com/xvoland/pixu
+- Homepage: https://dotoca.net/pixu
+- YouTube: https://youtube.com/@xvoland
+
+---
+
+Want me to add anything else or change the wording?
+
