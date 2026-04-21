@@ -1,3 +1,21 @@
+/*
+   Copyright © 2026, Vitalii Tereshchuk | DOTOCA.NET All rights reserved.
+   Homepage: https://dotoca.net/pixu
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
+*/
+
 package main
 
 import (
@@ -66,9 +84,9 @@ type ImageRenderer struct {
 
 // rgbTo256 converts RGB to 256-color terminal code
 func rgbTo256(r, g, b uint8) int {
-	r6 := int(float64(r) * 5 / 255)
-	g6 := int(float64(g) * 5 / 255)
-	b6 := int(float64(b) * 5 / 255)
+	r6 := int(math.Round(float64(r)*5/255)) % 6
+	g6 := int(math.Round(float64(g)*5/255)) % 6
+	b6 := int(math.Round(float64(b)*5/255)) % 6
 	return 16 + 36*r6 + 6*g6 + b6
 }
 
@@ -95,15 +113,21 @@ func applyFloydSteinberg(img image.Image) image.Image {
 			oldG := float64(g>>8) + errG[y][x]
 			oldB := float64(b>>8) + errB[y][x]
 
-			if oldR > 255 {
-				oldR = 255
-			}
-			if oldG > 255 {
-				oldG = 255
-			}
-			if oldB > 255 {
-				oldB = 255
-			}
+		if oldR > 255 {
+			oldR = 255
+		} else if oldR < 0 {
+			oldR = 0
+		}
+		if oldG > 255 {
+			oldG = 255
+		} else if oldG < 0 {
+			oldG = 0
+		}
+		if oldB > 255 {
+			oldB = 255
+		} else if oldB < 0 {
+			oldB = 0
+		}
 
 			newR := uint8(oldR)
 			newG := uint8(oldG)
@@ -469,8 +493,10 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 				displayW = int(math.Round(float64(imgW) * float64(displayH) / float64(imgH)))
 			}
 
-			resized := imaging.Resize(img, displayW, displayH, imaging.Lanczos)
-			printTGPKittyFromImage(resized)
+		resized := imaging.Resize(img, displayW, displayH, imaging.Lanczos)
+		buf := new(bytes.Buffer)
+		png.Encode(buf, resized)
+		printTGPKitty(base64.StdEncoding.EncodeToString(buf.Bytes()))
 
 			termRowH := displayH/20 + 3
 			fmt.Printf("\r\033[%dH\033[7m%s | %dx%d | TGP | %d/%d\033[0m\n",
@@ -611,7 +637,9 @@ func showQRCode() {
 		data := base64.StdEncoding.EncodeToString(buf.Bytes())
 		fmt.Printf("\033]1337;File=name=qr.png;width=auto;height=auto;inline=1:%s\a\n", data)
 	default:
-		printTGPKittyFromImage(resized)
+		buf := new(bytes.Buffer)
+		png.Encode(buf, resized)
+		printTGPKitty(base64.StdEncoding.EncodeToString(buf.Bytes()))
 	}
 
 	if qrCodeText != "" {
@@ -620,33 +648,7 @@ func showQRCode() {
 	}
 }
 
-func printTGPKittyFromImage(img image.Image) {
-	fmt.Print("\033[3;0H")
 
-	buf := new(bytes.Buffer)
-	png.Encode(buf, img)
-	data := base64.StdEncoding.EncodeToString(buf.Bytes())
-
-	for i := 0; i < len(data); i += chunkSize {
-		end := i + chunkSize
-		if end > len(data) {
-			end = len(data)
-		}
-		chunk := data[i:end]
-
-		more := 0
-		if end < len(data) {
-			more = 1
-		}
-
-		if i == 0 {
-			fmt.Printf("\033_Ga=T,f=100,t=d,m=%d;%s\033\\", more, chunk)
-		} else {
-			fmt.Printf("\033_Gm=%d;%s\033\\", more, chunk)
-		}
-	}
-	fmt.Print("\n")
-}
 
 func pathExists(path string) (bool, error) {
 	info, err := os.Stat(path)
@@ -727,33 +729,34 @@ func main() {
 				log.Fatalf("Invalid rotate value: %d (must be 0, 90, 180, or 270)", rotate)
 			}
 
-			if mode == "tgp" {
-				termW, termH := getTerminalSize()
-				imgH := img.Bounds().Dy()
-				imgW := img.Bounds().Dx()
+	if mode == "tgp" {
+		termW, termH := getTerminalSize()
+		imgH := img.Bounds().Dy()
+		imgW := img.Bounds().Dx()
 
-				if width == 0 && height == 0 {
-					width = termW * 10
-					height = int(math.Round(float64(imgH) * float64(width) / float64(imgW)))
-					if height > (termH-4)*20 {
-						height = (termH - 4) * 20
-						width = int(math.Round(float64(imgW) * float64(height) / float64(imgH)))
-					}
-				} else if width > 0 && height == 0 {
-					width = width * 10
-					if imgW > 0 {
-						height = int(math.Round(float64(imgH) * float64(width) / float64(imgW)))
-					}
-				} else if height > 0 && width == 0 {
-					height = height * 20
-					if imgH > 0 {
-						width = int(math.Round(float64(imgW) * float64(height) / float64(imgH)))
-					}
-				}
-
-				printTGP(img, width, height, rotate, invert)
-				return
+		tgpW, tgpH := width, height
+		if tgpW == 0 && tgpH == 0 {
+			tgpW = termW * 10
+			tgpH = int(math.Round(float64(imgH) * float64(tgpW) / float64(imgW)))
+			if tgpH > (termH-4)*20 {
+				tgpH = (termH - 4) * 20
+				tgpW = int(math.Round(float64(imgW) * float64(tgpH) / float64(imgH)))
 			}
+		} else if tgpW > 0 && tgpH == 0 {
+			tgpW = tgpW * 10
+			if imgW > 0 {
+				tgpH = int(math.Round(float64(imgH) * float64(tgpW) / float64(imgW)))
+			}
+		} else if tgpH > 0 && tgpW == 0 {
+			tgpH = tgpH * 20
+			if imgH > 0 {
+				tgpW = int(math.Round(float64(imgW) * float64(tgpH) / float64(imgH)))
+			}
+		}
+
+		printTGP(img, tgpW, tgpH, rotate, invert)
+		return
+	}
 
 			if fit {
 				if tw, th := getTerminalSize(); tw > 0 {
