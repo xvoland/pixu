@@ -39,9 +39,35 @@ import (
 	"github.com/disintegration/imaging"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+	_ "golang.org/x/image/webp"
 )
 
-const DEFAULT_VERSION = "x.x.x"
+const defaultVersion = "x.x.x"
+
+const (
+	cellWidthPxDefault  = 10 // approximate terminal cell width in pixels
+	cellHeightPxDefault = 20 // approximate terminal cell height in pixels
+
+	statusLinesTGP        = 4 // status lines for TGP mode
+	statusLinesTerminal   = 4 // status lines for terminal rendering (fit mode)
+	statusLinesInteractive = 3 // status lines for interactive mode (excluding header)
+)
+
+// getCellSize returns terminal cell size in pixels, with env override
+func getCellSize() (int, int) {
+	w, h := cellWidthPxDefault, cellHeightPxDefault
+	if v := os.Getenv("PIXU_CELL_WIDTH"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			w = n
+		}
+	}
+	if v := os.Getenv("PIXU_CELL_HEIGHT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			h = n
+		}
+	}
+	return w, h
+}
 
 var qrCodeText = "Scan to support PIXU!\nhttps://paypal.me/xvoland\n"
 
@@ -53,7 +79,11 @@ var qrCodeData []byte
 
 func init() {
 	if qrCodeBase64 != "" {
-		qrCodeData, _ = base64.StdEncoding.DecodeString(qrCodeBase64)
+		var err error
+		qrCodeData, err = base64.StdEncoding.DecodeString(qrCodeBase64)
+		if err != nil {
+			log.Printf("Warning: failed to decode embedded QR code: %v", err)
+		}
 	}
 }
 
@@ -62,7 +92,7 @@ var (
 	mode                  string
 	invert                bool
 	char                  string
-	version               = DEFAULT_VERSION
+	version = defaultVersion
 	showVersion           bool
 	fit                   bool
 	dither                bool
@@ -82,17 +112,51 @@ type ImageRenderer struct {
 	dither        bool
 }
 
-// rgbTo256 converts RGB to 256-color terminal code
+// rgbTo256 converts RGB to 256-color terminal code with grayscale ramp
 func rgbTo256(r, g, b uint8) int {
-	r6 := int(math.Round(float64(r)*5/255)) % 6
-	g6 := int(math.Round(float64(g)*5/255)) % 6
-	b6 := int(math.Round(float64(b)*5/255)) % 6
+	// check if the color is close to grayscale
+	rF, gF, bF := float64(r), float64(g), float64(b)
+	avg := (rF + gF + bF) / 3
+	maxDiff := math.Max(math.Abs(rF-avg), math.Max(math.Abs(gF-avg), math.Abs(bF-avg)))
+
+	// if all channels are within ~10 of each other, use grayscale ramp (232-255)
+	if maxDiff <= 10 {
+		gray := int(math.Round(avg / 255 * 23))
+		if gray < 0 {
+			gray = 0
+		} else if gray > 23 {
+			gray = 23
+		}
+		return 232 + gray
+	}
+
+	r6 := int(math.Round(float64(r) * 5 / 255))
+	g6 := int(math.Round(float64(g) * 5 / 255))
+	b6 := int(math.Round(float64(b) * 5 / 255))
+	if r6 > 5 {
+		r6 = 5
+	}
+	if g6 > 5 {
+		g6 = 5
+	}
+	if b6 > 5 {
+		b6 = 5
+	}
 	return 16 + 36*r6 + 6*g6 + b6
+}
+
+// quantize maps a color channel value to the nearest level (0..levels-1)
+func quantize(val float64, levels int) float64 {
+	step := 255.0 / float64(levels-1)
+	return math.Round(val/step) * step
 }
 
 func applyFloydSteinberg(img image.Image) image.Image {
 	bounds := img.Bounds()
 	w, h := bounds.Dx(), bounds.Dy()
+
+	// quantize to 6 levels per channel (matches 256-color cube)
+	const levels = 6
 
 	errR := make([][]float64, h)
 	errG := make([][]float64, h)
@@ -113,52 +177,52 @@ func applyFloydSteinberg(img image.Image) image.Image {
 			oldG := float64(g>>8) + errG[y][x]
 			oldB := float64(b>>8) + errB[y][x]
 
-		if oldR > 255 {
-			oldR = 255
-		} else if oldR < 0 {
-			oldR = 0
-		}
-		if oldG > 255 {
-			oldG = 255
-		} else if oldG < 0 {
-			oldG = 0
-		}
-		if oldB > 255 {
-			oldB = 255
-		} else if oldB < 0 {
-			oldB = 0
-		}
+			if oldR > 255 {
+				oldR = 255
+			} else if oldR < 0 {
+				oldR = 0
+			}
+			if oldG > 255 {
+				oldG = 255
+			} else if oldG < 0 {
+				oldG = 0
+			}
+			if oldB > 255 {
+				oldB = 255
+			} else if oldB < 0 {
+				oldB = 0
+			}
 
-			newR := uint8(oldR)
-			newG := uint8(oldG)
-			newB := uint8(oldB)
+			newR := quantize(oldR, levels)
+			newG := quantize(oldG, levels)
+			newB := quantize(oldB, levels)
 
 			newImg.Set(x+bounds.Min.X, y+bounds.Min.Y, color.RGBA{
-				R: newR, G: newG, B: newB, A: uint8(a >> 8),
+				R: uint8(newR), G: uint8(newG), B: uint8(newB), A: uint8(a >> 8),
 			})
 
-			errR[y][x] = oldR - float64(newR)
-			errG[y][x] = oldG - float64(newG)
-			errB[y][x] = oldB - float64(newB)
+			diffR := oldR - newR
+			diffG := oldG - newG
+			diffB := oldB - newB
 
 			if x+1 < w {
-				errR[y][x+1] += errR[y][x] * 7 / 16
-				errG[y][x+1] += errG[y][x] * 7 / 16
-				errB[y][x+1] += errB[y][x] * 7 / 16
+				errR[y][x+1] += diffR * 7 / 16
+				errG[y][x+1] += diffG * 7 / 16
+				errB[y][x+1] += diffB * 7 / 16
 			}
 			if y+1 < h {
 				if x > 0 {
-					errR[y+1][x-1] += errR[y][x] * 3 / 16
-					errG[y+1][x-1] += errG[y][x] * 3 / 16
-					errB[y+1][x-1] += errB[y][x] * 3 / 16
+					errR[y+1][x-1] += diffR * 3 / 16
+					errG[y+1][x-1] += diffG * 3 / 16
+					errB[y+1][x-1] += diffB * 3 / 16
 				}
-				errR[y+1][x] += errR[y][x] * 5 / 16
-				errG[y+1][x] += errG[y][x] * 5 / 16
-				errB[y+1][x] += errB[y][x] * 5 / 16
+				errR[y+1][x] += diffR * 5 / 16
+				errG[y+1][x] += diffG * 5 / 16
+				errB[y+1][x] += diffB * 5 / 16
 				if x+1 < w {
-					errR[y+1][x+1] += errR[y][x] * 1 / 16
-					errG[y+1][x+1] += errG[y][x] * 1 / 16
-					errB[y+1][x+1] += errB[y][x] * 1 / 16
+					errR[y+1][x+1] += diffR * 1 / 16
+					errG[y+1][x+1] += diffG * 1 / 16
+					errB[y+1][x+1] += diffB * 1 / 16
 				}
 			}
 		}
@@ -226,6 +290,37 @@ func rotateImage(img image.Image, degrees int) image.Image {
 	default:
 		return img
 	}
+}
+
+// calculateTGPSize computes pixel dimensions for TGP display
+func calculateTGPSize(imgW, imgH, w, h, termW, termH, statusLines int) (int, int) {
+	cellW, cellH := getCellSize()
+	termPixelW := termW * cellW
+	termPixelH := (termH - statusLines) * cellH
+
+	if w == 0 && h == 0 {
+		w = termPixelW
+		if imgW > 0 {
+			h = int(math.Round(float64(imgH) * float64(w) / float64(imgW)))
+		}
+		if h > termPixelH {
+			h = termPixelH
+			if imgH > 0 {
+				w = int(math.Round(float64(imgW) * float64(h) / float64(imgH)))
+			}
+		}
+	} else if w > 0 && h == 0 {
+		w = w * cellW
+		if imgW > 0 {
+			h = int(math.Round(float64(imgH) * float64(w) / float64(imgW)))
+		}
+	} else if h > 0 && w == 0 {
+		h = h * cellH
+		if imgH > 0 {
+			w = int(math.Round(float64(imgW) * float64(h) / float64(imgH)))
+		}
+	}
+	return w, h
 }
 
 // printTGP prints image in iTerm2/Kitty using inline image protocol
@@ -299,7 +394,8 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 	lines := make([]string, 0, bounds.Dy()/2)
 
 	for y := bounds.Min.Y; y < bounds.Max.Y; y += 2 {
-		line := ""
+		var sb strings.Builder
+		sb.Grow(bounds.Dx() * 30)
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
 			topColor := resized.At(x, y)
 			bottomColor := topColor
@@ -342,31 +438,22 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 				if index >= len(runes) {
 					index = len(runes) - 1
 				}
-				line += string(runes[index])
+				sb.WriteString(string(runes[index]))
 			case "256":
-				line += fmt.Sprintf("\033[38;5;%d;48;5;%dm%s",
-					rgbTo256(tr8, tg8, tb8),
-					rgbTo256(br8, bg8, bb8),
-					charToUse)
+				fmt.Fprintf(&sb, "\033[38;5;%d;48;5;%dm%s", rgbTo256(tr8, tg8, tb8), rgbTo256(br8, bg8, bb8), charToUse)
 			case "grayscale":
 				grayTop := uint8(0.299*float64(tr8) + 0.587*float64(tg8) + 0.114*float64(tb8))
 				grayBottom := uint8(0.299*float64(br8) + 0.587*float64(bg8) + 0.114*float64(bb8))
-				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s",
-					grayTop, grayTop, grayTop,
-					grayBottom, grayBottom, grayBottom,
-					charToUse)
+				fmt.Fprintf(&sb, "\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s", grayTop, grayTop, grayTop, grayBottom, grayBottom, grayBottom, charToUse)
 			default: // rgb
-				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s",
-					tr8, tg8, tb8,
-					br8, bg8, bb8,
-					charToUse)
+				fmt.Fprintf(&sb, "\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s", tr8, tg8, tb8, br8, bg8, bb8, charToUse)
 			}
 		}
 
 		if r.mode != "ascii" {
-			line += "\033[0m"
+			sb.WriteString("\033[0m")
 		}
-		lines = append(lines, line)
+	lines = append(lines, sb.String())
 	}
 
 	return lines
@@ -374,7 +461,7 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 
 func createLink(url, text string) string {
 	if !term.IsTerminal(int(os.Stdout.Fd())) {
-		return fmt.Sprintf("%s", url)
+		return url
 	}
 	return fmt.Sprintf("\033]8;;%s\033\\%s\033]8;;\033\\", url, text)
 }
@@ -433,7 +520,11 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 	if len(files) == 1 {
 		if isDir, _ := pathExists(files[0]); isDir {
 			dirPath := files[0]
-			entries, _ := os.ReadDir(dirPath)
+			entries, err := os.ReadDir(dirPath)
+			if err != nil {
+				fmt.Printf("Error reading directory: %v\n", err)
+				return
+			}
 			files = nil
 			for _, e := range entries {
 				if !e.IsDir() {
@@ -474,31 +565,18 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 		imgH := bounds.Dy()
 
 		if mode == "tgp" {
-			displayW := width
-			displayH := height
+			displayW, displayH := calculateTGPSize(imgW, imgH, width, height, termW, termH, 6)
 
-			termPixelW := termW * 10
-			termPixelH := (termH - 6) * 20
-
-			if displayW == 0 && displayH == 0 {
-				displayW = termPixelW
-				displayH = int(math.Round(float64(imgH) * float64(displayW) / float64(imgW)))
-				if displayH > termPixelH {
-					displayH = termPixelH
-					displayW = int(math.Round(float64(imgW) * float64(displayH) / float64(imgH)))
-				}
-			} else if displayW > 0 && displayH == 0 && imgW > 0 {
-				displayH = int(math.Round(float64(imgH) * float64(displayW) / float64(imgW)))
-			} else if displayH > 0 && displayW == 0 && imgH > 0 {
-				displayW = int(math.Round(float64(imgW) * float64(displayH) / float64(imgH)))
+			resized := imaging.Resize(img, displayW, displayH, imaging.Lanczos)
+			buf := new(bytes.Buffer)
+			if err := png.Encode(buf, resized); err != nil {
+				fmt.Printf("Error encoding image: %v\n", err)
+				return
 			}
+			printTGPKitty(base64.StdEncoding.EncodeToString(buf.Bytes()))
 
-		resized := imaging.Resize(img, displayW, displayH, imaging.Lanczos)
-		buf := new(bytes.Buffer)
-		png.Encode(buf, resized)
-		printTGPKitty(base64.StdEncoding.EncodeToString(buf.Bytes()))
-
-			termRowH := displayH/20 + 3
+			_, cellH := getCellSize()
+			termRowH := displayH/cellH + 3
 			fmt.Printf("\r\033[%dH\033[7m%s | %dx%d | TGP | %d/%d\033[0m\n",
 				termRowH, filepath.Base(files[currentIndex]), imgW, imgH, currentIndex+1, len(files))
 			fmt.Printf("\033[%dH\033[33m←/→: prev/next | ESC/Ctrl+C: quit\033[0m\n", termRowH+1)
@@ -508,41 +586,31 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 		displayW := termW
 		displayH := termW * imgH / imgW / 2
 
-		if displayH > termH-4 {
-			displayH = termH - 4
+if displayH > termH-statusLinesTerminal {
+		displayH = termH - statusLinesTerminal
 			displayW = displayH * 2 * imgW / imgH
 		}
 
-		resized := imaging.Resize(img, displayW, displayH*2, imaging.Lanczos)
-		bounds = resized.Bounds()
-		dispH := bounds.Dy() / 2
+		renderer := &ImageRenderer{
+			width:      displayW,
+			height:     displayH,
+			mode:       "rgb",
+			invert:     invert,
+			char:       char,
+			rotate:     rotate,
+			asciiChars: "@#%*+=-:. ",
+		}
+		lines := renderer.renderTerminal(img)
+		dispH := len(lines)
 
 		fmt.Print("\033[1;0H")
-
-		for y := bounds.Min.Y; y < bounds.Max.Y; y += 2 {
+		for _, line := range lines {
 			fmt.Print("\r")
-			line := ""
-			for x := bounds.Min.X; x < bounds.Max.X; x++ {
-				topColor := resized.At(x, y)
-				bottomColor := topColor
-				if y+1 < bounds.Max.Y {
-					bottomColor = resized.At(x, y+1)
-				}
-
-				tr, tg, tb, _ := topColor.RGBA()
-				br, bg, bb, _ := bottomColor.RGBA()
-				tr8, tg8, tb8 := uint8(tr>>8), uint8(tg>>8), uint8(tb>>8)
-				br8, bg8, bb8 := uint8(br>>8), uint8(bg>>8), uint8(bb>>8)
-
-				line += fmt.Sprintf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm▀\033[0m",
-					tr8, tg8, tb8, br8, bg8, bb8)
-			}
-			fmt.Print(line)
-			fmt.Println()
+			fmt.Println(line)
 		}
 
 		fmt.Print("\r")
-		fmt.Printf("\033[%dH\033[7m%s | %dx%d | ASCII | %d/%d\033[0m\n",
+		fmt.Printf("\033[%dH\033[7m%s | %dx%d | RGB | %d/%d\033[0m\n",
 			dispH+1, filepath.Base(files[currentIndex]), imgW, imgH, currentIndex+1, len(files))
 		fmt.Printf("\033[%dH\033[33m←/→: prev/next | ESC/Ctrl+C: quit\033[0m\n", dispH+2)
 	}
@@ -616,7 +684,39 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 }
 
 func showQRCode() {
-	img, err := imaging.Decode(bytes.NewReader(qrCodeData), imaging.AutoOrientation(true))
+	var data []byte
+
+	// use embedded data from ldflags if available
+	if len(qrCodeData) > 0 {
+		data = qrCodeData
+	} else {
+		// fallback: try to read from executable directory
+		exePath, err := os.Executable()
+		if err == nil {
+			qrPath := filepath.Join(filepath.Dir(exePath), "qr-code.jpg")
+			data, err = os.ReadFile(qrPath)
+			if err != nil {
+				log.Printf("Warning: failed to read QR code from executable directory: %v", err)
+			}
+		}
+		if len(data) == 0 {
+			// try current working directory
+			var err error
+			data, err = os.ReadFile("qr-code.jpg")
+			if err != nil {
+				log.Printf("Warning: failed to read QR code from current directory: %v", err)
+			}
+		}
+	}
+
+	if len(data) == 0 {
+		fmt.Println("QR code is not available in this build.")
+		fmt.Println("To support PIXU, visit: https://paypal.me/xvoland")
+		printCopyleft()
+		return
+	}
+
+	img, err := imaging.Decode(bytes.NewReader(data), imaging.AutoOrientation(true))
 	if err != nil {
 		fmt.Println("Error decoding QR:", err)
 		return
@@ -633,12 +733,16 @@ func showQRCode() {
 	switch term {
 	case "iTerm.app":
 		buf := new(bytes.Buffer)
-		png.Encode(buf, resized)
-		data := base64.StdEncoding.EncodeToString(buf.Bytes())
-		fmt.Printf("\033]1337;File=name=qr.png;width=auto;height=auto;inline=1:%s\a\n", data)
+		if err := png.Encode(buf, resized); err != nil {
+			log.Fatalf("Failed to encode QR image: %v", err)
+		}
+		encodedData := base64.StdEncoding.EncodeToString(buf.Bytes())
+		fmt.Printf("\033]1337;File=name=qr.png;width=auto;height=auto;inline=1:%s\a\n", encodedData)
 	default:
 		buf := new(bytes.Buffer)
-		png.Encode(buf, resized)
+		if err := png.Encode(buf, resized); err != nil {
+			log.Fatalf("Failed to encode QR image: %v", err)
+		}
 		printTGPKitty(base64.StdEncoding.EncodeToString(buf.Bytes()))
 	}
 
@@ -664,17 +768,21 @@ func pathExists(path string) (bool, error) {
 func main() {
 
 	rootCmd := &cobra.Command{
-		Use:   "pixu",
-		Short: "PIXU: ANSI and TGP render images in terminal",
-		Args:  cobra.ArbitraryArgs,
+		Use:  "pixu",
+		Args: cobra.ArbitraryArgs,
 		Run: func(cmd *cobra.Command, args []string) {
-			if showVersion {
-				fmt.Println("pixu", version)
-				printCopyleft()
-				return
-			}
+		if showVersion {
+			fmt.Println("pixu", version)
+			printCopyleft()
+			return
+		}
 
-			if qr {
+		validModes := map[string]bool{"rgb": true, "grayscale": true, "256": true, "ascii": true, "tgp": true}
+		if !validModes[mode] {
+			log.Fatalf("Invalid mode: %q (must be rgb, grayscale, 256, ascii, or tgp)", mode)
+		}
+
+		if qr {
 				showQRCode()
 				return
 			}
@@ -699,22 +807,22 @@ func main() {
 				} else {
 					data, err = os.ReadFile(input)
 				}
-				if err != nil {
-					log.Fatalf("Error reading input: %v", err)
-				}
-				img, _, err = image.Decode(bytes.NewReader(data))
-				if err != nil {
-					log.Fatalf("Error decoding image: %v", err)
-				}
-			} else if len(args) > 0 && args[0] == "-" {
-				data, err := io.ReadAll(os.Stdin)
-				if err != nil {
-					log.Fatalf("Error reading stdin: %v", err)
-				}
-				img, _, err = image.Decode(bytes.NewReader(data))
-				if err != nil {
-					log.Fatalf("Error decoding image from stdin: %v", err)
-				}
+		if err != nil {
+			log.Fatalf("Error reading input: %v", err)
+		}
+		img, err = imaging.Decode(bytes.NewReader(data), imaging.AutoOrientation(true))
+		if err != nil {
+			log.Fatalf("Error decoding image: %v", err)
+		}
+	} else if len(args) > 0 && args[0] == "-" {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			log.Fatalf("Error reading stdin: %v", err)
+		}
+		img, err = imaging.Decode(bytes.NewReader(data), imaging.AutoOrientation(true))
+		if err != nil {
+			log.Fatalf("Error decoding image from stdin: %v", err)
+		}
 			} else if len(args) == 0 {
 				cmd.Help()
 				return
@@ -725,38 +833,24 @@ func main() {
 				}
 			}
 
-			if rotate != 0 && rotate != 90 && rotate != 180 && rotate != 270 {
-				log.Fatalf("Invalid rotate value: %d (must be 0, 90, 180, or 270)", rotate)
-			}
+if rotate != 0 && rotate != 90 && rotate != 180 && rotate != 270 {
+		log.Fatalf("Invalid rotate value: %d (must be 0, 90, 180, or 270)", rotate)
+	}
+
+	if width < 0 || height < 0 {
+		log.Fatalf("Invalid width or height: width=%d height=%d (must be >= 0)", width, height)
+	}
 
 	if mode == "tgp" {
-		termW, termH := getTerminalSize()
-		imgH := img.Bounds().Dy()
-		imgW := img.Bounds().Dx()
+			termW, termH := getTerminalSize()
+			imgH := img.Bounds().Dy()
+			imgW := img.Bounds().Dx()
 
-		tgpW, tgpH := width, height
-		if tgpW == 0 && tgpH == 0 {
-			tgpW = termW * 10
-			tgpH = int(math.Round(float64(imgH) * float64(tgpW) / float64(imgW)))
-			if tgpH > (termH-4)*20 {
-				tgpH = (termH - 4) * 20
-				tgpW = int(math.Round(float64(imgW) * float64(tgpH) / float64(imgH)))
-			}
-		} else if tgpW > 0 && tgpH == 0 {
-			tgpW = tgpW * 10
-			if imgW > 0 {
-				tgpH = int(math.Round(float64(imgH) * float64(tgpW) / float64(imgW)))
-			}
-		} else if tgpH > 0 && tgpW == 0 {
-			tgpH = tgpH * 20
-			if imgH > 0 {
-				tgpW = int(math.Round(float64(imgW) * float64(tgpH) / float64(imgH)))
-			}
+			tgpW, tgpH := calculateTGPSize(imgW, imgH, width, height, termW, termH, statusLinesTGP)
+
+			printTGP(img, tgpW, tgpH, rotate, invert)
+			return
 		}
-
-		printTGP(img, tgpW, tgpH, rotate, invert)
-		return
-	}
 
 			if fit {
 				if tw, th := getTerminalSize(); tw > 0 {
