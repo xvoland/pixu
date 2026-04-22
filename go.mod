@@ -3,6 +3,7 @@ module pixu
 go 1.25.0
 
 require (
+	github.com/atotto/clipboard v0.1.4
 	github.com/disintegration/imaging v1.6.2
 	github.com/mattn/go-isatty v0.0.21
 	github.com/spf13/cobra v1.9.1

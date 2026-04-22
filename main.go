@@ -37,6 +37,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/disintegration/imaging"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
@@ -91,16 +92,18 @@ func init() {
 
 var (
 	width, height, rotate int
-	mode                  string
-	invert                bool
-	char                  string
+	mode string
+	invert bool
+	char string
 	version = defaultVersion
-	showVersion           bool
-	fit                   bool
-	dither                bool
-	interactive           bool
-	qr                    bool
-	input                 string
+	showVersion bool
+	fit bool
+	dither bool
+	interactive bool
+	qr bool
+	input string
+	paste bool
+	output string
 )
 
 // ImageRenderer holds rendering options
@@ -810,7 +813,19 @@ func main() {
 			var img image.Image
 			var err error
 
-			if input != "" {
+			if paste {
+		clipData, err := clipboard.ReadAll()
+		if err != nil {
+			log.Fatalf("Error reading clipboard: %v", err)
+		}
+		if len(clipData) == 0 {
+			log.Fatalf("Clipboard is empty or does not contain image data")
+		}
+		img, err = imaging.Decode(bytes.NewReader([]byte(clipData)), imaging.AutoOrientation(true))
+		if err != nil {
+			log.Fatalf("Error decoding image from clipboard: %v", err)
+		}
+	} else if input != "" {
 				var data []byte
 
 				if input == "-" {
@@ -888,9 +903,19 @@ if rotate != 0 && rotate != 90 && rotate != 180 && rotate != 270 {
 				dither:     dither,
 			}
 
-			for _, line := range renderer.renderTerminal(img) {
-				fmt.Println(line)
-			}
+var outputWriter io.Writer = os.Stdout
+	if output != "" {
+		f, err := os.Create(output)
+		if err != nil {
+			log.Fatalf("Error creating output file: %v", err)
+		}
+		defer f.Close()
+		outputWriter = f
+	}
+
+	for _, line := range renderer.renderTerminal(img) {
+		fmt.Fprintln(outputWriter, line)
+	}
 		},
 	}
 
@@ -910,6 +935,8 @@ if rotate != 0 && rotate != 90 && rotate != 180 && rotate != 270 {
 	rootCmd.Flags().BoolVarP(&interactive, "interactive", "I", false, "Interactive mode with navigation and zoom")
 	rootCmd.Flags().BoolVarP(&qr, "qr", "", false, "Show QR code for donation")
 	rootCmd.Flags().StringVar(&input, "input", "", "Input file (use - for stdin)")
+	rootCmd.Flags().BoolVarP(&paste, "paste", "p", false, "Read image from clipboard")
+	rootCmd.Flags().StringVarP(&output, "output", "o", "", "Output file (save to file instead of stdout)")
 	rootCmd.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "Show version and exit")
 
 	applyEnvDefaults() // apply default values from environment variables
