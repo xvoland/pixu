@@ -480,7 +480,7 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 }
 
 func createLink(url, text string) string {
-	if !term.IsTerminal(int(os.Stdout.Fd())) {
+	if !isatty.IsTerminal(uintptr(os.Stdout.Fd())) && !isatty.IsCygwinTerminal(uintptr(os.Stdout.Fd())) {
 		return url
 	}
 	return fmt.Sprintf("\033]8;;%s\033\\%s\033]8;;\033\\", url, text)
@@ -585,7 +585,7 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 		imgH := bounds.Dy()
 
 		if mode == "tgp" {
-			displayW, displayH := calculateTGPSize(imgW, imgH, width, height, termW, termH, 6)
+			displayW, displayH := calculateTGPSize(imgW, imgH, width, height, termW, termH, statusLinesInteractive)
 
 			resized := imaging.Resize(img, displayW, displayH, imaging.Lanczos)
 			buf := new(bytes.Buffer)
@@ -603,10 +603,10 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 			return
 		}
 
-		displayW := termW
+displayW := termW
 		displayH := termW * imgH / imgW / 2
 
-if displayH > termH-statusLinesTerminal {
+		if imgW > 0 && displayH > termH-statusLinesTerminal {
 		displayH = termH - statusLinesTerminal
 			displayW = displayH * 2 * imgW / imgH
 		}
@@ -775,8 +775,6 @@ func showQRCode() {
 		fmt.Println(qrCodeText)
 	}
 }
-
-
 
 func pathExists(path string) (bool, error) {
 	info, err := os.Stat(path)
@@ -967,7 +965,7 @@ Run: func(cmd *cobra.Command, args []string) {
 	rootCmd.Flags().StringVarP(&mode, "mode", "m", "rgb", "Mode: rgb/grayscale/ascii/tgp")
 	rootCmd.Flags().BoolVarP(&invert, "invert", "i", false, "Invert colors")
 	rootCmd.Flags().StringVarP(&char, "char", "c", "▀", "Block character to use")
-	rootCmd.Flags().IntVarP(&rotate, "rotate", "r", 0, "Rotate: 90,180,270")
+	rootCmd.Flags().IntVarP(&rotate, "rotate", "r", 0, "Rotate: 0,90,180,270,360")
 	rootCmd.Flags().BoolVarP(&fit, "fit", "f", false, "Fit to terminal size")
 	rootCmd.Flags().BoolVarP(&dither, "dither", "d", false, "Apply Floyd-Steinberg dithering")
 	rootCmd.Flags().BoolVarP(&interactive, "interactive", "I", false, "Interactive mode with navigation and zoom")
