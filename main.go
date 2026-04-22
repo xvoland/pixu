@@ -54,6 +54,9 @@ const (
 	statusLinesTGP        = 4 // status lines for TGP mode
 	statusLinesTerminal   = 4 // status lines for terminal rendering (fit mode)
 	statusLinesInteractive = 3 // status lines for interactive mode (excluding header)
+
+	maxWidth  = 10000 // maximum allowed width in characters
+	maxHeight = 10000 // maximum allowed height in characters
 )
 
 // getCellSize returns terminal cell size in pixels, with env override
@@ -288,9 +291,16 @@ func getTerminalSize() (int, int) {
 	return w, h
 }
 
+// isValidRotate checks if rotation value is valid (0, 90, 180, 270, 360)
+func isValidRotate(degrees int) bool {
+	return degrees%90 == 0 && degrees >= 0 && degrees <= 360
+}
+
 // rotateImage rotates the image by degrees
 func rotateImage(img image.Image, degrees int) image.Image {
-	switch degrees {
+	// normalize to 0-270 range (360 == 0)
+	effective := degrees % 360
+	switch effective {
 	case 90:
 		return imaging.Rotate90(img)
 	case 180:
@@ -779,41 +789,31 @@ func pathExists(path string) (bool, error) {
 	return false, err
 }
 
-func main() {
+// validateFlags checks all flag values are valid
+func validateFlags() {
+	validModes := map[string]bool{"rgb": true, "grayscale": true, "256": true, "ascii": true, "tgp": true}
+	if !validModes[mode] {
+		log.Fatalf("Invalid mode: %q (must be rgb, grayscale, 256, ascii, or tgp)", mode)
+	}
 
-	rootCmd := &cobra.Command{
-		Use:  "pixu",
-		Args: cobra.ArbitraryArgs,
-		Run: func(cmd *cobra.Command, args []string) {
-		if showVersion {
-			fmt.Println("pixu", version)
-			printCopyleft()
-			return
-		}
+	if !isValidRotate(rotate) {
+		log.Fatalf("Invalid rotate value: %d (must be 0, 90, 180, 270, or 360)", rotate)
+	}
 
-		validModes := map[string]bool{"rgb": true, "grayscale": true, "256": true, "ascii": true, "tgp": true}
-		if !validModes[mode] {
-			log.Fatalf("Invalid mode: %q (must be rgb, grayscale, 256, ascii, or tgp)", mode)
-		}
+	if width < 0 || height < 0 {
+		log.Fatalf("Invalid width or height: width=%d height=%d (must be >= 0)", width, height)
+	}
+	if width > maxWidth || height > maxHeight {
+		log.Fatalf("Width or height too large: width=%d height=%d (max %d)", width, height, maxWidth)
+	}
+}
 
-		if qr {
-				showQRCode()
-				return
-			}
+// loadImage loads image from clipboard, input, stdin, or file argument
+func loadImage(args []string) image.Image {
+	var img image.Image
+	var err error
 
-			if interactive && (mode == "" || mode == "rgb") {
-				mode = "tgp"
-			}
-
-			if interactive {
-				runInteractiveMode(args, mode, invert, rotate, char, width, height)
-				return
-			}
-
-			var img image.Image
-			var err error
-
-			if paste {
+	if paste {
 		clipData, err := clipboard.ReadAll()
 		if err != nil {
 			log.Fatalf("Error reading clipboard: %v", err)
@@ -825,14 +825,16 @@ func main() {
 		if err != nil {
 			log.Fatalf("Error decoding image from clipboard: %v", err)
 		}
-	} else if input != "" {
-				var data []byte
+		return img
+	}
 
-				if input == "-" {
-					data, err = io.ReadAll(os.Stdin)
-				} else {
-					data, err = os.ReadFile(input)
-				}
+	if input != "" {
+		var data []byte
+		if input == "-" {
+			data, err = io.ReadAll(os.Stdin)
+		} else {
+			data, err = os.ReadFile(input)
+		}
 		if err != nil {
 			log.Fatalf("Error reading input: %v", err)
 		}
@@ -840,7 +842,10 @@ func main() {
 		if err != nil {
 			log.Fatalf("Error decoding image: %v", err)
 		}
-	} else if len(args) > 0 && args[0] == "-" {
+		return img
+	}
+
+	if len(args) > 0 && args[0] == "-" {
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			log.Fatalf("Error reading stdin: %v", err)
@@ -849,61 +854,57 @@ func main() {
 		if err != nil {
 			log.Fatalf("Error decoding image from stdin: %v", err)
 		}
-			} else if len(args) == 0 {
-				cmd.Help()
-				return
-			} else {
-				img, err = imaging.Open(args[0], imaging.AutoOrientation(true))
-				if err != nil {
-					log.Fatalf("Error loading image: %v", err)
-				}
-			}
-
-if rotate != 0 && rotate != 90 && rotate != 180 && rotate != 270 {
-		log.Fatalf("Invalid rotate value: %d (must be 0, 90, 180, or 270)", rotate)
+		return img
 	}
 
-	if width < 0 || height < 0 {
-		log.Fatalf("Invalid width or height: width=%d height=%d (must be >= 0)", width, height)
+	if len(args) == 0 {
+		return nil
 	}
 
+	img, err = imaging.Open(args[0], imaging.AutoOrientation(true))
+	if err != nil {
+		log.Fatalf("Error loading image: %v", err)
+	}
+	return img
+}
+
+// renderAndOutput renders the image and writes to output
+func renderAndOutput(img image.Image) {
 	if mode == "tgp" {
-			termW, termH := getTerminalSize()
-			imgH := img.Bounds().Dy()
-			imgW := img.Bounds().Dx()
+		termW, termH := getTerminalSize()
+		imgW := img.Bounds().Dx()
+		imgH := img.Bounds().Dy()
+		tgpW, tgpH := calculateTGPSize(imgW, imgH, width, height, termW, termH, statusLinesTGP)
+		printTGP(img, tgpW, tgpH, rotate, invert)
+		return
+	}
 
-			tgpW, tgpH := calculateTGPSize(imgW, imgH, width, height, termW, termH, statusLinesTGP)
-
-			printTGP(img, tgpW, tgpH, rotate, invert)
-			return
+	if fit {
+		if tw, th := getTerminalSize(); tw > 0 {
+			width = tw
+			height = th - statusLinesTerminal
 		}
+	}
 
-			if fit {
-				if tw, th := getTerminalSize(); tw > 0 {
-					width = tw
-					height = th - 4
-				}
-			}
+	scaleWidth, scaleHeight := calculateSize(img, width, height, false)
 
-			scaleWidth, scaleHeight := calculateSize(img, width, height, false)
+	ascii := os.Getenv("PIXU_ASCII_CHARS")
+	if ascii == "" {
+		ascii = "@#%*+=-:. "
+	}
 
-			ascii := os.Getenv("PIXU_ASCII_CHARS")
-			if ascii == "" {
-				ascii = "@#%*+=-:. "
-			}
+	renderer := &ImageRenderer{
+		width:      scaleWidth,
+		height:     scaleHeight,
+		mode:       mode,
+		invert:     invert,
+		char:       char,
+		rotate:     rotate,
+		asciiChars: ascii,
+		dither:     dither,
+	}
 
-			renderer := &ImageRenderer{
-				width:      scaleWidth,
-				height:     scaleHeight,
-				mode:       mode,
-				invert:     invert,
-				char:       char,
-				rotate:     rotate,
-				asciiChars: ascii,
-				dither:     dither,
-			}
-
-var outputWriter io.Writer = os.Stdout
+	var outputWriter io.Writer = os.Stdout
 	if output != "" {
 		f, err := os.Create(output)
 		if err != nil {
@@ -916,7 +917,44 @@ var outputWriter io.Writer = os.Stdout
 	for _, line := range renderer.renderTerminal(img) {
 		fmt.Fprintln(outputWriter, line)
 	}
-		},
+}
+
+func main() {
+
+	rootCmd := &cobra.Command{
+		Use:  "pixu",
+		Args: cobra.ArbitraryArgs,
+Run: func(cmd *cobra.Command, args []string) {
+		if showVersion {
+			fmt.Println("pixu", version)
+			printCopyleft()
+			return
+		}
+
+		validateFlags()
+
+		if qr {
+			showQRCode()
+			return
+		}
+
+		if interactive && (mode == "" || mode == "rgb") {
+			mode = "tgp"
+		}
+
+		if interactive {
+			runInteractiveMode(args, mode, invert, rotate, char, width, height)
+			return
+		}
+
+		img := loadImage(args)
+		if img == nil {
+			cmd.Help()
+			return
+		}
+
+		renderAndOutput(img)
+	},
 	}
 
 	// Disable built-in help command
