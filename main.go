@@ -31,12 +31,14 @@ import (
 	"log"
 	"math"
 	"os"
+	"runtime"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/disintegration/imaging"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	_ "golang.org/x/image/webp"
@@ -265,10 +267,15 @@ func calculateSize(img image.Image, width, height int, isTGP bool) (int, int) {
 
 func getTerminalSize() (int, int) {
 	fd := int(os.Stdout.Fd())
-	if !term.IsTerminal(fd) {
+	if !isatty.IsTerminal(uintptr(fd)) && !isatty.IsCygwinTerminal(uintptr(fd)) {
 		if tty, err := os.Open("/dev/tty"); err == nil {
 			fd = int(tty.Fd())
 			tty.Close()
+		} else if runtime.GOOS == "windows" {
+			if tty, err := os.Open("CON"); err == nil {
+				fd = int(tty.Fd())
+				tty.Close()
+			}
 		}
 	}
 	w, h, err := term.GetSize(fd)
@@ -617,9 +624,13 @@ if displayH > termH-statusLinesTerminal {
 
 	showImage()
 
-	tty, err := os.Open("/dev/tty")
+	ttyPath := "/dev/tty"
+	if runtime.GOOS == "windows" {
+		ttyPath = "CON"
+	}
+	tty, err := os.Open(ttyPath)
 	if err != nil {
-		fmt.Println("Error: cannot open /dev/tty for input")
+		fmt.Println("Error: cannot open terminal for input")
 		return
 	}
 	defer tty.Close()

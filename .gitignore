@@ -1,0 +1,16 @@
+# Binaries
+pixu
+/bin/
+*.exe
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# QR code resource
+qr-code.jpg
