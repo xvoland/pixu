@@ -30,6 +30,8 @@ import (
 	"io"
 	"log"
 	"math"
+	"net/http"
+	"net/url"
 	"os"
 	"runtime"
 	"path/filepath"
@@ -37,7 +39,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/atotto/clipboard"
 	"github.com/disintegration/imaging"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
@@ -812,18 +813,74 @@ func loadImage(args []string) image.Image {
 	var err error
 
 	if paste {
-		clipData, err := clipboard.ReadAll()
-		if err != nil {
-			log.Fatalf("Error reading clipboard: %v", err)
+		// 1. Try binary image data (screenshot, Photoshop, etc.)
+		clipData := clipboardReadImage()
+		if len(clipData) > 0 {
+			img, err = imaging.Decode(bytes.NewReader(clipData), imaging.AutoOrientation(true))
+			if err == nil {
+				return img
+			}
 		}
-		if len(clipData) == 0 {
-			log.Fatalf("Clipboard is empty or does not contain image data")
+
+		// 2. Try text content (file path, URL, or base64)
+		clipText := strings.TrimSpace(clipboardReadText())
+		if clipText == "" {
+			log.Fatalf("Clipboard is empty")
 		}
-		img, err = imaging.Decode(bytes.NewReader([]byte(clipData)), imaging.AutoOrientation(true))
-		if err != nil {
-			log.Fatalf("Error decoding image from clipboard: %v", err)
+
+		// 2a. File path
+		if isDir, _ := pathExists(clipText); !isDir {
+			if _, err := os.Stat(clipText); err == nil {
+				ext := strings.ToLower(filepath.Ext(clipText))
+				imageExts := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".bmp": true, ".webp": true}
+				if imageExts[ext] {
+					img, err = imaging.Open(clipText, imaging.AutoOrientation(true))
+					if err == nil {
+						return img
+					}
+				}
+			}
 		}
-		return img
+
+		// 2b. URL (http/https)
+		if u, err := url.Parse(clipText); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
+			resp, err := http.Get(clipText)
+			if err == nil {
+				defer resp.Body.Close()
+				if data, err := io.ReadAll(resp.Body); err == nil && len(data) > 0 {
+					img, err = imaging.Decode(bytes.NewReader(data), imaging.AutoOrientation(true))
+					if err == nil {
+						return img
+					}
+				}
+			}
+		}
+
+		// 2c. Base64 (with or without data:image/...;base64, prefix)
+		b64Data := clipText
+		if idx := strings.Index(clipText, ";base64,"); idx != -1 {
+			b64Data = clipText[idx+8:]
+		}
+		if decoded, err := base64.StdEncoding.DecodeString(b64Data); err == nil && len(decoded) > 0 {
+			img, err = imaging.Decode(bytes.NewReader(decoded), imaging.AutoOrientation(true))
+			if err == nil {
+				return img
+			}
+		}
+		if decoded, err := base64.URLEncoding.DecodeString(b64Data); err == nil && len(decoded) > 0 {
+			img, err = imaging.Decode(bytes.NewReader(decoded), imaging.AutoOrientation(true))
+			if err == nil {
+				return img
+			}
+		}
+
+		// 2d. Try decoding raw text bytes as image
+		img, err = imaging.Decode(bytes.NewReader([]byte(clipText)), imaging.AutoOrientation(true))
+		if err == nil {
+			return img
+		}
+
+		log.Fatalf("Cannot decode image from clipboard content")
 	}
 
 	if input != "" {
