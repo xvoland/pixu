@@ -20,6 +20,7 @@ package main
 
 import (
 	"bytes"
+	_ "embed"
 	"encoding/base64"
 	"fmt"
 	"image"
@@ -80,19 +81,8 @@ var qrCodeText = "Scan to support PIXU!\nhttps://paypal.me/xvoland\n"
 
 var buildSource = "local"
 
-var qrCodeBase64 = ""
-
+//go:embed qr-code.jpg
 var qrCodeData []byte
-
-func init() {
-	if qrCodeBase64 != "" {
-		var err error
-		qrCodeData, err = base64.StdEncoding.DecodeString(qrCodeBase64)
-		if err != nil {
-			log.Printf("Warning: failed to decode embedded QR code: %v", err)
-		}
-	}
-}
 
 var (
 	width, height, rotate int
@@ -498,41 +488,64 @@ func printCopyleft() {
 
 }
 
-// apply environment defaults
-func applyEnvDefaults() {
-	var envDefaults = map[string]interface{}{
-		"PIXU_WIDTH":  &width,
-		"PIXU_HEIGHT": &height,
-		"PIXU_MODE":   &mode,
-		"PIXU_INVERT": &invert,
-		"PIXU_CHAR":   &char,
-		"PIXU_ROTATE": &rotate,
+// applyEnvDefaults sets flag values from environment variables,
+// but only for flags not explicitly set by the user on the command line.
+// Priority: CLI flag > env variable > default
+func applyEnvDefaults(cmd *cobra.Command) {
+	type envMapping struct {
+		env string
+		set func(string)
 	}
 
-	for env, ptr := range envDefaults {
-		val := os.Getenv(env)
+	mappings := []envMapping{
+		{"PIXU_WIDTH", func(v string) { if n, err := strconv.Atoi(v); err == nil { width = n } }},
+		{"PIXU_HEIGHT", func(v string) { if n, err := strconv.Atoi(v); err == nil { height = n } }},
+		{"PIXU_MODE", func(v string) { mode = v }},
+		{"PIXU_INVERT", func(v string) {
+			if v == "1" || v == "true" || v == "TRUE" {
+				invert = true
+			} else if v == "0" || v == "false" || v == "FALSE" {
+				invert = false
+			}
+		}},
+		{"PIXU_CHAR", func(v string) { char = v }},
+		{"PIXU_ROTATE", func(v string) { if n, err := strconv.Atoi(v); err == nil { rotate = n } }},
+	}
+
+	flagToEnv := map[string]string{
+		"width": "PIXU_WIDTH",
+		"height": "PIXU_HEIGHT",
+		"mode": "PIXU_MODE",
+		"invert": "PIXU_INVERT",
+		"char": "PIXU_CHAR",
+		"rotate": "PIXU_ROTATE",
+	}
+
+	for _, m := range mappings {
+		val := os.Getenv(m.env)
 		if val == "" {
 			continue
 		}
 
-		switch p := ptr.(type) {
-		case *int:
-			if v, err := strconv.Atoi(val); err == nil {
-				*p = v
-			}
-		case *string:
-			*p = val
-		case *bool:
-			if val == "1" || val == "true" || val == "TRUE" {
-				*p = true
-			} else if val == "0" || val == "false" || val == "FALSE" {
-				*p = false
+		// skip if the corresponding CLI flag was explicitly set by the user
+		var flagName string
+		for fn, ev := range flagToEnv {
+			if ev == m.env {
+				flagName = fn
+				break
 			}
 		}
+		if flagName != "" && cmd.Flags().Changed(flagName) {
+			continue
+		}
+
+		m.set(val)
 	}
 }
 
-func runInteractiveMode(args []string, mode string, invert bool, rotate int, char string, width int, height int) {
+
+
+func runInteractiveMode(args []string, mode string, invert bool, rotate int, char string, width int, height int, dither bool, asciiChars string) {
 	imageExtensions := map[string]bool{
 		".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".bmp": true, ".webp": true,
 	}
@@ -604,8 +617,13 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 			return
 		}
 
-displayW := termW
-		displayH := termW * imgH / imgW / 2
+		displayW := termW
+		var displayH int
+		if imgW > 0 {
+			displayH = termW * imgH / imgW / 2
+		} else {
+			displayH = termH - statusLinesTerminal
+		}
 
 		if imgW > 0 && displayH > termH-statusLinesTerminal {
 		displayH = termH - statusLinesTerminal
@@ -613,13 +631,14 @@ displayW := termW
 		}
 
 		renderer := &ImageRenderer{
-			width:      displayW,
-			height:     displayH,
-			mode:       "rgb",
-			invert:     invert,
-			char:       char,
-			rotate:     rotate,
-			asciiChars: "@#%*+=-:. ",
+			width: displayW,
+			height: displayH,
+			mode: mode,
+			invert: invert,
+			char: char,
+			rotate: rotate,
+			asciiChars: asciiChars,
+			dither: dither,
 		}
 		lines := renderer.renderTerminal(img)
 		dispH := len(lines)
@@ -631,8 +650,8 @@ displayW := termW
 		}
 
 		fmt.Print("\r")
-		fmt.Printf("\033[%dH\033[7m%s | %dx%d | RGB | %d/%d\033[0m\n",
-			dispH+1, filepath.Base(files[currentIndex]), imgW, imgH, currentIndex+1, len(files))
+	fmt.Printf("\033[%dH\033[7m%s | %dx%d | %s | %d/%d\033[0m\n", 
+			dispH+1, filepath.Base(files[currentIndex]), imgW, imgH, strings.ToUpper(mode), currentIndex+1, len(files))
 		fmt.Printf("\033[%dH\033[33m←/→: prev/next | ESC/Ctrl+C: quit\033[0m\n", dispH+2)
 	}
 
@@ -709,39 +728,14 @@ displayW := termW
 }
 
 func showQRCode() {
-	var data []byte
-
-	// use embedded data from ldflags if available
-	if len(qrCodeData) > 0 {
-		data = qrCodeData
-	} else {
-		// fallback: try to read from executable directory
-		exePath, err := os.Executable()
-		if err == nil {
-			qrPath := filepath.Join(filepath.Dir(exePath), "qr-code.jpg")
-			data, err = os.ReadFile(qrPath)
-			if err != nil {
-				log.Printf("Warning: failed to read QR code from executable directory: %v", err)
-			}
-		}
-		if len(data) == 0 {
-			// try current working directory
-			var err error
-			data, err = os.ReadFile("qr-code.jpg")
-			if err != nil {
-				log.Printf("Warning: failed to read QR code from current directory: %v", err)
-			}
-		}
-	}
-
-	if len(data) == 0 {
+	if len(qrCodeData) == 0 {
 		fmt.Println("QR code is not available in this build.")
 		fmt.Println("To support PIXU, visit: https://paypal.me/xvoland")
 		printCopyleft()
 		return
 	}
 
-	img, err := imaging.Decode(bytes.NewReader(data), imaging.AutoOrientation(true))
+	img, err := imaging.Decode(bytes.NewReader(qrCodeData), imaging.AutoOrientation(true))
 	if err != nil {
 		fmt.Println("Error decoding QR:", err)
 		return
@@ -998,7 +992,11 @@ Run: func(cmd *cobra.Command, args []string) {
 		}
 
 		if interactive {
-			runInteractiveMode(args, mode, invert, rotate, char, width, height)
+			asciiChars := os.Getenv("PIXU_ASCII_CHARS")
+			if asciiChars == "" {
+				asciiChars = "@#%*+=-:. "
+			}
+			runInteractiveMode(args, mode, invert, rotate, char, width, height, dither, asciiChars)
 			return
 		}
 
@@ -1032,11 +1030,9 @@ Run: func(cmd *cobra.Command, args []string) {
 	rootCmd.Flags().StringVarP(&output, "output", "o", "", "Output file (save to file instead of stdout)")
 	rootCmd.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "Show version and exit")
 
-	applyEnvDefaults() // apply default values from environment variables
-
 	// version command only (like git)
 	var versionCmd = &cobra.Command{
-		Use:   "version",
+		Use: "version",
 		Short: "Show version",
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Println("PIXU version", version)
@@ -1044,6 +1040,10 @@ Run: func(cmd *cobra.Command, args []string) {
 		},
 	}
 	rootCmd.AddCommand(versionCmd)
+
+	// parse flags first so we can check which were explicitly set
+	rootCmd.ParseFlags(os.Args[1:])
+	applyEnvDefaults(rootCmd) // apply env defaults, but not overriding explicit CLI flags
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
