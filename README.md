@@ -99,6 +99,9 @@ pixu photo.jpg --mode grayscale
 
 # Display using Kitty/iTerm2 graphics protocol
 pixu photo.jpg --mode tgp
+
+# Display using Sixel protocol (xterm, mlterm)
+pixu photo.jpg --mode sixel
 ```
 
 ### Resizing
@@ -238,12 +241,14 @@ export PIXU_CELL_HEIGHT=20
 | `256` | 256-color mode | Most terminals |
 | `ascii` | Plain ASCII art | All terminals |
 | `tgp` | Terminal Graphics Protocol (iTerm2/Kitty) | iTerm2, Kitty, Ghostty, WezTerm |
+| `sixel` | Sixel graphics protocol | xterm, mlterm, RLogin, TinyTERM |
 
 ## Requirements
 
 - Go 1.25 or later (for building from source)
 - Terminal with true color support (for RGB mode)
 - iTerm2, Kitty, Ghostty, or WezTerm (for TGP mode)
+- xterm, mlterm, or similar (for Sixel mode)
 
 ## Configuration
 
@@ -300,6 +305,7 @@ done
 ### Image not displaying correctly
 
 - Use `--mode tgp` for iTerm2, Kitty, Ghostty, or WezTerm
+- Use `--mode sixel` for xterm, mlterm, or similar
 - Use `--mode 256` for older terminals
 - Check terminal color support: `printf '\e[48;2;255;0;0mTEST\e[0m\n'`
 

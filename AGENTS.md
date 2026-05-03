@@ -1,7 +1,7 @@
 # PIXU - Project Guidelines
 
 ## Project Overview
-Terminal image viewer written in Go. Renders images directly in terminal using various protocols (RGB, Grayscale, 256-color, ASCII, TGP/Kitty/iTerm2).
+Terminal image viewer written in Go. Renders images directly in terminal using various protocols (RGB, Grayscale, 256-color, ASCII, TGP/Kitty/iTerm2, Sixel).
 
 ## Build & Run
 ```bash
@@ -24,6 +24,7 @@ QR code image (`qr-code.jpg`) is embedded into the binary via `//go:embed` direc
 - `golang.design/x/clipboard` — clipboard for Linux/Windows (not used on macOS)
 - `golang.org/x/term` — terminal size detection
 - `github.com/mattn/go-isatty` — TTY detection
+- `github.com/mattn/go-sixel` — Sixel graphics protocol for xterm/mlterm
 
 ## Platform Notes
 - **macOS**: CGo required for clipboard image support (NSPasteboard). Photoshop puts images as TIFF, not PNG — `clipboard_darwin.m` handles this via NSImage fallback.

@@ -34,14 +34,15 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"runtime"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/disintegration/imaging"
 	"github.com/mattn/go-isatty"
+	"github.com/mattn/go-sixel"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	_ "golang.org/x/image/webp"
@@ -305,6 +306,13 @@ func rotateImage(img image.Image, degrees int) image.Image {
 
 // calculateTGPSize computes pixel dimensions for TGP display
 func calculateTGPSize(imgW, imgH, w, h, termW, termH, statusLines int) (int, int) {
+	if termW <= 0 || termW > maxWidth {
+		termW = 80
+	}
+	if termH <= 0 || termH > maxHeight {
+		termH = 24
+	}
+
 	cellW, cellH := getCellSize()
 	termPixelW := termW * cellW
 	termPixelH := (termH - statusLines) * cellH
@@ -350,6 +358,9 @@ func printTGP(img image.Image, width, height int, rotate int, invert bool) {
 	// Note: Kitty/Ghostty terminal graphics can take dimensions from PNG metadata,
 	// but resizing is useful to control display size manually
 	resized := imaging.Resize(img, width, height, imaging.Lanczos)
+	if resized == nil {
+		log.Fatalf("Failed to resize image: result is nil")
+	}
 
 	// Encode the resized image into PNG format
 	buf := new(bytes.Buffer)
@@ -390,6 +401,32 @@ func printTGPKitty(data string) {
 		}
 	}
 	fmt.Print("\n")
+}
+
+func printSixel(img image.Image, width, height int, rotate int, invert bool) {
+	img = rotateImage(img, rotate)
+
+	if invert {
+		img = imaging.Invert(img)
+	}
+
+	resized := img
+	if width > 0 && height > 0 {
+		resized = imaging.Resize(img, width, height, imaging.Lanczos)
+		if resized == nil {
+			log.Fatalf("Failed to resize image for sixel")
+		}
+	}
+
+	enc := sixel.NewEncoder(os.Stdout)
+	enc.Width = width
+	enc.Height = height
+	enc.Dither = dither
+	enc.Colors = 256
+
+	if err := enc.Encode(resized); err != nil {
+		log.Fatalf("Failed to encode sixel: %v", err)
+	}
 }
 
 // renderTerminal returns terminal representation lines
@@ -602,6 +639,10 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 			displayW, displayH := calculateTGPSize(imgW, imgH, width, height, termW, termH, statusLinesInteractive)
 
 			resized := imaging.Resize(img, displayW, displayH, imaging.Lanczos)
+			if resized == nil {
+				fmt.Printf("Error: failed to resize image\n")
+				return
+			}
 			buf := new(bytes.Buffer)
 			if err := png.Encode(buf, resized); err != nil {
 				fmt.Printf("Error encoding image: %v\n", err)
@@ -640,6 +681,9 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 			asciiChars: asciiChars,
 			dither: dither,
 		}
+		if mode == "ascii" && char != "" && char != "▀" {
+			renderer.asciiChars = char
+		}
 		lines := renderer.renderTerminal(img)
 		dispH := len(lines)
 
@@ -670,10 +714,12 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 
 	oldState, err := term.MakeRaw(int(tty.Fd()))
 	if err != nil {
+		tty.Close()
 		fmt.Println("Error: cannot set raw mode")
 		return
 	}
 	defer term.Restore(int(tty.Fd()), oldState)
+	defer tty.Close()
 
 	for {
 		buf := make([]byte, 10)
@@ -784,9 +830,9 @@ func pathExists(path string) (bool, error) {
 
 // validateFlags checks all flag values are valid
 func validateFlags() {
-	validModes := map[string]bool{"rgb": true, "grayscale": true, "256": true, "ascii": true, "tgp": true}
+	validModes := map[string]bool{"rgb": true, "grayscale": true, "256": true, "ascii": true, "tgp": true, "sixel": true}
 	if !validModes[mode] {
-		log.Fatalf("Invalid mode: %q (must be rgb, grayscale, 256, ascii, or tgp)", mode)
+		log.Fatalf("Invalid mode: %q (must be rgb, grayscale, 256, ascii, tgp, or sixel)", mode)
 	}
 
 	if !isValidRotate(rotate) {
@@ -928,6 +974,15 @@ func renderAndOutput(img image.Image) {
 		return
 	}
 
+	if mode == "sixel" {
+		termW, termH := getTerminalSize()
+		imgW := img.Bounds().Dx()
+		imgH := img.Bounds().Dy()
+		sixelW, sixelH := calculateTGPSize(imgW, imgH, width, height, termW, termH, statusLinesTGP)
+		printSixel(img, sixelW, sixelH, rotate, invert)
+		return
+	}
+
 	if fit {
 		if tw, th := getTerminalSize(); tw > 0 {
 			width = tw
@@ -970,10 +1025,13 @@ func renderAndOutput(img image.Image) {
 
 func main() {
 
-	rootCmd := &cobra.Command{
+rootCmd := &cobra.Command{
 		Use:  "pixu",
 		Args: cobra.ArbitraryArgs,
-Run: func(cmd *cobra.Command, args []string) {
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			applyEnvDefaults(cmd)
+		},
+		Run: func(cmd *cobra.Command, args []string) {
 		if showVersion {
 			fmt.Println("pixu", version)
 			printCopyleft()
@@ -985,10 +1043,6 @@ Run: func(cmd *cobra.Command, args []string) {
 		if qr {
 			showQRCode()
 			return
-		}
-
-		if interactive && (mode == "" || mode == "rgb") {
-			mode = "tgp"
 		}
 
 		if interactive {
@@ -1017,7 +1071,7 @@ Run: func(cmd *cobra.Command, args []string) {
 	// Flags
 	rootCmd.Flags().IntVarP(&height, "height", "h", 0, "Height in characters")
 	rootCmd.Flags().IntVarP(&width, "width", "w", 0, "Width in characters")
-	rootCmd.Flags().StringVarP(&mode, "mode", "m", "rgb", "Mode: rgb/grayscale/ascii/tgp")
+	rootCmd.Flags().StringVarP(&mode, "mode", "m", "rgb", "Mode: rgb/grayscale/ascii/tgp/sixel")
 	rootCmd.Flags().BoolVarP(&invert, "invert", "i", false, "Invert colors")
 	rootCmd.Flags().StringVarP(&char, "char", "c", "▀", "Block character to use")
 	rootCmd.Flags().IntVarP(&rotate, "rotate", "r", 0, "Rotate: 0,90,180,270,360")
@@ -1040,10 +1094,6 @@ Run: func(cmd *cobra.Command, args []string) {
 		},
 	}
 	rootCmd.AddCommand(versionCmd)
-
-	// parse flags first so we can check which were explicitly set
-	rootCmd.ParseFlags(os.Args[1:])
-	applyEnvDefaults(rootCmd) // apply env defaults, but not overriding explicit CLI flags
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
