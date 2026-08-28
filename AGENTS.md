@@ -27,9 +27,10 @@ QR code image (`qr-code.jpg`) is embedded into the binary via `//go:embed` direc
 - `github.com/mattn/go-sixel` — Sixel graphics protocol for xterm/mlterm
 
 ## Platform Notes
-- **macOS**: CGo required for clipboard image support (NSPasteboard). Photoshop puts images as TIFF, not PNG — `clipboard_darwin.m` handles this via NSImage fallback.
-- **Linux**: Requires `libx11-dev` for clipboard. Wayland not supported (XWayland only).
+- **macOS**: CGo required for clipboard image support (NSPasteboard). Photoshop puts images as TIFF, not PNG — `clipboard_darwin.m` handles this via NSImage fallback. Because of CGo, release cross-builds (`make build`) set `CGO_ENABLED=1` for darwin targets; darwin binaries must be built on macOS (or with osxcross).
+- **Linux**: Clipboard uses `golang.design/x/clipboard` (X11); needs `libx11` at runtime. Wayland is not supported (XWayland only).
 - **Windows**: No CGo needed for clipboard.
+- **Cross-compilation**: `make build` builds all platforms in one pass with per-OS CGO (darwin=1, others=0). It works from a macOS host; building darwin binaries from Linux/Windows requires osxcross.
 
 ## Code Conventions
 - Comments in English only

@@ -29,8 +29,10 @@ build:
 		ARCH=$${platform#*/}; \
 		OUT=$(BIN_DIR)/$(APP_NAME)-$${OS}-$${ARCH}; \
 		if [ "$${OS}" = "windows" ]; then OUT=$${OUT}.exe; fi; \
-		echo "Building $$OUT ($(VERSION))..."; \
-		CGO_ENABLED=0 GOOS=$${OS} GOARCH=$${ARCH} go build -ldflags "$(LDFLAGS)" -o $$OUT .; \
+		CGO=0; \
+		if [ "$${OS}" = "darwin" ]; then CGO=1; fi; \
+		echo "Building $$OUT ($(VERSION), CGO_ENABLED=$$CGO)..."; \
+		CGO_ENABLED=$$CGO GOOS=$${OS} GOARCH=$${ARCH} go build -ldflags "$(LDFLAGS)" -o $$OUT .; \
 	done
 
 clean:
