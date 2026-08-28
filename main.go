@@ -653,7 +653,7 @@ func printCopyleft() {
 	fmt.Println("")
 	printCopyleftBody()
 	year := time.Now().Year()
-	fmt.Printf("Copyright © %d, Vitalii Tereshchuk | URL: %s\n",
+	fmt.Printf("Copyright © %d, Vitalii Tereshchuk / xVoLAnD | URL: %s\n",
 		year, createLink("https://dotoca.net", "DOTOCA.NET"))
 }
 
@@ -1263,7 +1263,7 @@ func main() {
 		Run: func(cmd *cobra.Command, args []string) {
 			if showVersion {
 				year := time.Now().Year()
-				fmt.Printf("%s, Copyright © %d, Vitalii Tereshchuk\n\n", versionLine(), year)
+				fmt.Printf("%s, Copyright © %d, Vitalii Tereshchuk / xVoLAnD\n\n", versionLine(), year)
 				printCopyleftBody()
 				return
 			}
@@ -1317,7 +1317,7 @@ func main() {
 		Short: "Show version",
 		Run: func(cmd *cobra.Command, args []string) {
 			year := time.Now().Year()
-			fmt.Printf("%s, Copyright © %d, Vitalii Tereshchuk\n\n", versionLine(), year)
+			fmt.Printf("%s, Copyright © %d, Vitalii Tereshchuk / xVoLAnD\n\n", versionLine(), year)
 			printCopyleftBody()
 		},
 	}
