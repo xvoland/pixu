@@ -50,6 +50,16 @@ import (
 
 const defaultVersion = "x.x.x"
 
+// versionLine returns the version string for display. The build source is shown
+// in parentheses only when it differs from the version (e.g. a dev or dirty
+// build), so a clean release tag reads simply "pixu v1.0.0".
+func versionLine() string {
+	if buildSource != "" && buildSource != version {
+		return fmt.Sprintf("pixu %s (%s)", version, buildSource)
+	}
+	return fmt.Sprintf("pixu %s", version)
+}
+
 const (
 	cellWidthPxDefault  = 10 // approximate terminal cell width in pixels
 	cellHeightPxDefault = 20 // approximate terminal cell height in pixels
@@ -1247,7 +1257,7 @@ func main() {
 		},
 		Run: func(cmd *cobra.Command, args []string) {
 			if showVersion {
-				fmt.Printf("pixu %s (%s)\n", version, buildSource)
+				fmt.Println(versionLine())
 				printCopyleft()
 				return
 			}
@@ -1300,7 +1310,7 @@ func main() {
 		Use:   "version",
 		Short: "Show version",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("PIXU version %s (%s)\n", version, buildSource)
+			fmt.Println(versionLine())
 			printCopyleft()
 		},
 	}
