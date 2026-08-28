@@ -44,8 +44,8 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/mattn/go-sixel"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 	_ "golang.org/x/image/webp"
+	"golang.org/x/term"
 )
 
 const defaultVersion = "x.x.x"
@@ -54,8 +54,8 @@ const (
 	cellWidthPxDefault  = 10 // approximate terminal cell width in pixels
 	cellHeightPxDefault = 20 // approximate terminal cell height in pixels
 
-	statusLinesTGP        = 4 // status lines for TGP mode
-	statusLinesTerminal   = 4 // status lines for terminal rendering (fit mode)
+	statusLinesTGP         = 4 // status lines for TGP mode
+	statusLinesTerminal    = 4 // status lines for terminal rendering (fit mode)
 	statusLinesInteractive = 3 // status lines for interactive mode (excluding header)
 
 	maxWidth  = 10000 // maximum allowed width in characters
@@ -64,41 +64,40 @@ const (
 
 // getCellSize returns terminal cell size in pixels, with env override
 func getCellSize() (int, int) {
-	w, h := cellWidthPxDefault, cellHeightPxDefault
-	if v := os.Getenv("PIXU_CELL_WIDTH"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			w = n
-		}
-	}
-	if v := os.Getenv("PIXU_CELL_HEIGHT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			h = n
-		}
-	}
-	return w, h
+	return cellWidth, cellHeight
 }
 
 var qrCodeText = "Scan to support PIXU!\nhttps://paypal.me/xvoland\n"
 
 var buildSource = "local"
 
+// httpClient is used for fetching images by URL (e.g. from clipboard).
+// A timeout prevents the tool from hanging indefinitely on an unresponsive host.
+var httpClient = &http.Client{Timeout: 15 * time.Second}
+
 //go:embed qr-code.jpg
 var qrCodeData []byte
 
 var (
 	width, height, rotate int
-	mode string
-	invert bool
-	char string
-	version = defaultVersion
-	showVersion bool
-	fit bool
-	dither bool
-	interactive bool
-	qr bool
-	input string
-	paste bool
-	output string
+	mode                  string
+	invert                bool
+	char                  string
+	version               = defaultVersion
+	showVersion           bool
+	fit                   bool
+	dither                bool
+	interactive           bool
+	qr                    bool
+	input                 string
+	paste                 bool
+	output                string
+
+	// asciiChars is the ramp used in ascii mode (overridable via PIXU_ASCII_CHARS).
+	asciiChars = "@#%*+=-:. "
+	// cellWidth/cellHeight are terminal cell dimensions in pixels (overridable via env).
+	cellWidth  = cellWidthPxDefault
+	cellHeight = cellHeightPxDefault
 )
 
 // ImageRenderer holds rendering options
@@ -501,7 +500,7 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 		if r.mode != "ascii" {
 			sb.WriteString("\033[0m")
 		}
-	lines = append(lines, sb.String())
+		lines = append(lines, sb.String())
 	}
 
 	return lines
@@ -535,8 +534,16 @@ func applyEnvDefaults(cmd *cobra.Command) {
 	}
 
 	mappings := []envMapping{
-		{"PIXU_WIDTH", func(v string) { if n, err := strconv.Atoi(v); err == nil { width = n } }},
-		{"PIXU_HEIGHT", func(v string) { if n, err := strconv.Atoi(v); err == nil { height = n } }},
+		{"PIXU_WIDTH", func(v string) {
+			if n, err := strconv.Atoi(v); err == nil {
+				width = n
+			}
+		}},
+		{"PIXU_HEIGHT", func(v string) {
+			if n, err := strconv.Atoi(v); err == nil {
+				height = n
+			}
+		}},
 		{"PIXU_MODE", func(v string) { mode = v }},
 		{"PIXU_INVERT", func(v string) {
 			if v == "1" || v == "true" || v == "TRUE" {
@@ -546,15 +553,34 @@ func applyEnvDefaults(cmd *cobra.Command) {
 			}
 		}},
 		{"PIXU_CHAR", func(v string) { char = v }},
-		{"PIXU_ROTATE", func(v string) { if n, err := strconv.Atoi(v); err == nil { rotate = n } }},
+		{"PIXU_ROTATE", func(v string) {
+			if n, err := strconv.Atoi(v); err == nil {
+				rotate = n
+			}
+		}},
+		{"PIXU_ASCII_CHARS", func(v string) {
+			if v != "" {
+				asciiChars = v
+			}
+		}},
+		{"PIXU_CELL_WIDTH", func(v string) {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				cellWidth = n
+			}
+		}},
+		{"PIXU_CELL_HEIGHT", func(v string) {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				cellHeight = n
+			}
+		}},
 	}
 
 	flagToEnv := map[string]string{
-		"width": "PIXU_WIDTH",
+		"width":  "PIXU_WIDTH",
 		"height": "PIXU_HEIGHT",
-		"mode": "PIXU_MODE",
+		"mode":   "PIXU_MODE",
 		"invert": "PIXU_INVERT",
-		"char": "PIXU_CHAR",
+		"char":   "PIXU_CHAR",
 		"rotate": "PIXU_ROTATE",
 	}
 
@@ -579,8 +605,6 @@ func applyEnvDefaults(cmd *cobra.Command) {
 		m.set(val)
 	}
 }
-
-
 
 func runInteractiveMode(args []string, mode string, invert bool, rotate int, char string, width int, height int, dither bool, asciiChars string) {
 	imageExtensions := map[string]bool{
@@ -667,19 +691,19 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 		}
 
 		if imgW > 0 && displayH > termH-statusLinesTerminal {
-		displayH = termH - statusLinesTerminal
+			displayH = termH - statusLinesTerminal
 			displayW = displayH * 2 * imgW / imgH
 		}
 
 		renderer := &ImageRenderer{
-			width: displayW,
-			height: displayH,
-			mode: mode,
-			invert: invert,
-			char: char,
-			rotate: rotate,
+			width:      displayW,
+			height:     displayH,
+			mode:       mode,
+			invert:     invert,
+			char:       char,
+			rotate:     rotate,
 			asciiChars: asciiChars,
-			dither: dither,
+			dither:     dither,
 		}
 		if mode == "ascii" && char != "" && char != "▀" {
 			renderer.asciiChars = char
@@ -694,7 +718,7 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 		}
 
 		fmt.Print("\r")
-	fmt.Printf("\033[%dH\033[7m%s | %dx%d | %s | %d/%d\033[0m\n", 
+		fmt.Printf("\033[%dH\033[7m%s | %dx%d | %s | %d/%d\033[0m\n",
 			dispH+1, filepath.Base(files[currentIndex]), imgW, imgH, strings.ToUpper(mode), currentIndex+1, len(files))
 		fmt.Printf("\033[%dH\033[33m←/→: prev/next | ESC/Ctrl+C: quit\033[0m\n", dispH+2)
 	}
@@ -884,7 +908,7 @@ func loadImage(args []string) image.Image {
 
 		// 2b. URL (http/https)
 		if u, err := url.Parse(clipText); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
-			resp, err := http.Get(clipText)
+			resp, err := httpClient.Get(clipText)
 			if err == nil {
 				defer resp.Body.Close()
 				if data, err := io.ReadAll(resp.Body); err == nil && len(data) > 0 {
@@ -992,11 +1016,6 @@ func renderAndOutput(img image.Image) {
 
 	scaleWidth, scaleHeight := calculateSize(img, width, height, false)
 
-	ascii := os.Getenv("PIXU_ASCII_CHARS")
-	if ascii == "" {
-		ascii = "@#%*+=-:. "
-	}
-
 	renderer := &ImageRenderer{
 		width:      scaleWidth,
 		height:     scaleHeight,
@@ -1004,7 +1023,7 @@ func renderAndOutput(img image.Image) {
 		invert:     invert,
 		char:       char,
 		rotate:     rotate,
-		asciiChars: ascii,
+		asciiChars: asciiChars,
 		dither:     dither,
 	}
 
@@ -1025,43 +1044,39 @@ func renderAndOutput(img image.Image) {
 
 func main() {
 
-rootCmd := &cobra.Command{
+	rootCmd := &cobra.Command{
 		Use:  "pixu",
 		Args: cobra.ArbitraryArgs,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			applyEnvDefaults(cmd)
 		},
 		Run: func(cmd *cobra.Command, args []string) {
-		if showVersion {
-			fmt.Println("pixu", version)
-			printCopyleft()
-			return
-		}
-
-		validateFlags()
-
-		if qr {
-			showQRCode()
-			return
-		}
-
-		if interactive {
-			asciiChars := os.Getenv("PIXU_ASCII_CHARS")
-			if asciiChars == "" {
-				asciiChars = "@#%*+=-:. "
+			if showVersion {
+				fmt.Printf("pixu %s (%s)\n", version, buildSource)
+				printCopyleft()
+				return
 			}
-			runInteractiveMode(args, mode, invert, rotate, char, width, height, dither, asciiChars)
-			return
-		}
 
-		img := loadImage(args)
-		if img == nil {
-			cmd.Help()
-			return
-		}
+			validateFlags()
 
-		renderAndOutput(img)
-	},
+			if qr {
+				showQRCode()
+				return
+			}
+
+			if interactive {
+				runInteractiveMode(args, mode, invert, rotate, char, width, height, dither, asciiChars)
+				return
+			}
+
+			img := loadImage(args)
+			if img == nil {
+				cmd.Help()
+				return
+			}
+
+			renderAndOutput(img)
+		},
 	}
 
 	// Disable built-in help command
@@ -1086,10 +1101,10 @@ rootCmd := &cobra.Command{
 
 	// version command only (like git)
 	var versionCmd = &cobra.Command{
-		Use: "version",
+		Use:   "version",
 		Short: "Show version",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("PIXU version", version)
+			fmt.Printf("PIXU version %s (%s)\n", version, buildSource)
 			printCopyleft()
 		},
 	}
