@@ -691,6 +691,18 @@ func applyEnvDefaults(cmd *cobra.Command) {
 				cellHeight = n
 			}
 		}},
+		{"PIXU_SCALE", func(v string) {
+			if f, err := strconv.ParseFloat(v, 64); err == nil {
+				scale = f
+			}
+		}},
+		{"PIXU_DITHER", func(v string) {
+			if v == "1" || v == "true" || v == "TRUE" {
+				dither = true
+			} else if v == "0" || v == "false" || v == "FALSE" {
+				dither = false
+			}
+		}},
 	}
 
 	flagToEnv := map[string]string{
@@ -700,6 +712,8 @@ func applyEnvDefaults(cmd *cobra.Command) {
 		"invert": "PIXU_INVERT",
 		"char":   "PIXU_CHAR",
 		"rotate": "PIXU_ROTATE",
+		"scale":  "PIXU_SCALE",
+		"dither": "PIXU_DITHER",
 	}
 
 	for _, m := range mappings {

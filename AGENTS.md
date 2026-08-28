@@ -40,7 +40,7 @@ QR code image (`qr-code.jpg`) is embedded into the binary via `//go:embed` direc
 - Use `imaging.AutoOrientation(true)` when loading images
 - Clipboard `--paste` tries: binary image → file path → URL → base64 → raw text
 - Environment variables override defaults but not explicit CLI flags. Priority: **CLI flag > env variable > default**
-- Supported env variables: `PIXU_WIDTH`, `PIXU_HEIGHT`, `PIXU_MODE`, `PIXU_INVERT`, `PIXU_CHAR`, `PIXU_ROTATE`, `PIXU_ASCII_CHARS`, `PIXU_CELL_WIDTH`, `PIXU_CELL_HEIGHT`
+- Supported env variables: `PIXU_WIDTH`, `PIXU_HEIGHT`, `PIXU_MODE`, `PIXU_INVERT`, `PIXU_CHAR`, `PIXU_ROTATE`, `PIXU_ASCII_CHARS`, `PIXU_CELL_WIDTH`, `PIXU_CELL_HEIGHT`, `PIXU_SCALE`, `PIXU_DITHER`
 
 ## Lint & Verify
 ```bash

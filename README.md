@@ -293,6 +293,8 @@ you had passed it explicitly.
 | `PIXU_ASCII_CHARS` | ASCII character set | `@#%*+=-:. ` |
 | `PIXU_CELL_WIDTH` | Terminal cell width (px) | `10` |
 | `PIXU_CELL_HEIGHT` | Terminal cell height (px) | `20` |
+| `PIXU_SCALE` | Default scale factor (`auto` allowed as mode, not as scale) | `1.0` |
+| `PIXU_DITHER` | Apply Floyd-Steinberg dithering | `false` |
 
 ## Use Cases
 
