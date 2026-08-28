@@ -641,15 +641,20 @@ func createLink(url, text string) string {
 	return fmt.Sprintf("\033]8;;%s\033\\%s\033]8;;\033\\", url, text)
 }
 
-func printCopyleft() {
-	year := time.Now().Year()
-	fmt.Println("")
+// printCopyleftBody prints the project links (homepage, youtube, donation).
+func printCopyleftBody() {
 	fmt.Println("Homepage: ", createLink("https://dotoca.net/pixu", "https://dotoca.net/pixu"))
 	fmt.Println("Youtube:  ", createLink("https://youtube.com/@xvoland", "https://youtube.com/@xvoland"))
 	fmt.Println("Donation: ", createLink("https://paypal.me/xvoland", "https://paypal.me/xvoland"))
+}
+
+// printCopyleft prints the full copyleft block (used by the QR display).
+func printCopyleft() {
+	fmt.Println("")
+	printCopyleftBody()
+	year := time.Now().Year()
 	fmt.Printf("Copyright © %d, Vitalii Tereshchuk | URL: %s\n",
 		year, createLink("https://dotoca.net", "DOTOCA.NET"))
-
 }
 
 // applyEnvDefaults sets flag values from environment variables,
@@ -1257,8 +1262,9 @@ func main() {
 		},
 		Run: func(cmd *cobra.Command, args []string) {
 			if showVersion {
-				fmt.Println(versionLine())
-				printCopyleft()
+				year := time.Now().Year()
+				fmt.Printf("%s, Copyright © %d, Vitalii Tereshchuk\n\n", versionLine(), year)
+				printCopyleftBody()
 				return
 			}
 
@@ -1310,8 +1316,9 @@ func main() {
 		Use:   "version",
 		Short: "Show version",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(versionLine())
-			printCopyleft()
+			year := time.Now().Year()
+			fmt.Printf("%s, Copyright © %d, Vitalii Tereshchuk\n\n", versionLine(), year)
+			printCopyleftBody()
 		},
 	}
 	rootCmd.AddCommand(versionCmd)
