@@ -25,7 +25,7 @@
 
 ## Features
 
-- **Multiple rendering modes**: RGB, Grayscale, 256-color, ASCII art, and TGP (Terminal Graphics Protocol)
+- **Multiple rendering modes**: RGB, Grayscale, 256-color, ASCII art, TGP (iTerm2/Kitty), and Sixel — or `--mode auto` to pick the best one for the current terminal
 - **iTerm2 & Kitty support**: Display images inline in modern terminal emulators
 - **Interactive mode**: Browse through images with keyboard navigation
 - **Clipboard support**: Read images directly from clipboard
@@ -415,6 +415,7 @@ pixu img.png --width 80
 
 ### Image not displaying correctly
 
+- Use `--mode auto` to let pixu pick the best protocol for the current terminal
 - Use `--mode tgp` for iTerm2, Kitty, Ghostty, or WezTerm
 - Use `--mode sixel` for xterm, mlterm, or similar
 - Use `--mode 256` for older terminals
@@ -431,6 +432,14 @@ pixu img.png --width 80
 
 - Use smaller `--width` for faster rendering
 - Disable dithering (`--dither` can be slow on large images)
+
+### Clipboard (`--paste`) not working
+
+- On **Linux**, `--paste` uses the X11 clipboard backend, so it requires X11
+  (XWayland works). Under native **Wayland** (no X11) pixu prints a clear error
+  instead of failing silently.
+- On **macOS**, pixu reads the clipboard via NSPasteboard (CGo required at build time).
+- On **Windows**, the system clipboard is used directly.
 
 ## License
 
