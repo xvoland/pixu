@@ -63,6 +63,9 @@ const (
 )
 
 // getCellSize returns terminal cell size in pixels, with env override
+// getCellSize returns the terminal cell size in pixels. It is used to convert
+// character columns/rows into pixel dimensions for the tgp and sixel protocols,
+// where width/height are expressed in pixels rather than character cells.
 func getCellSize() (int, int) {
 	return cellWidth, cellHeight
 }
@@ -92,6 +95,7 @@ var (
 	input                 string
 	paste                 bool
 	output                string
+	scale                 = 1.0
 
 	// asciiChars is the ramp used in ascii mode (overridable via PIXU_ASCII_CHARS).
 	asciiChars = "@#%*+=-:. "
@@ -144,12 +148,18 @@ func rgbTo256(r, g, b uint8) int {
 	return 16 + 36*r6 + 6*g6 + b6
 }
 
-// quantize maps a color channel value to the nearest level (0..levels-1)
+// quantize maps a color channel value to the nearest of `levels` steps
+// (e.g. levels=6 spans 0..255 in 51-unit increments), used by dithering.
 func quantize(val float64, levels int) float64 {
 	step := 255.0 / float64(levels-1)
 	return math.Round(val/step) * step
 }
 
+// applyFloydSteinberg applies Floyd-Steinberg error diffusion dithering. The
+// image is quantized to 6 levels per channel so the result matches the 6x6x6
+// 256-color cube used by the "256" terminal mode. Per-row error buffers
+// propagate the quantization error to neighbouring pixels (right, and down-left /
+// down / down-right). It is O(width*height) and allocates three float buffers.
 func applyFloydSteinberg(img image.Image) image.Image {
 	bounds := img.Bounds()
 	w, h := bounds.Dx(), bounds.Dy()
@@ -230,7 +240,12 @@ func applyFloydSteinberg(img image.Image) image.Image {
 	return newImg
 }
 
-// calculateSize computes width/height automatically
+// calculateSize computes the effective width/height from explicit flags.
+//
+// For tgp/sixel (isTGP=true) the values are pixel dimensions; for text modes
+// (isTGP=false) width is a column count and height is a row count, where each
+// character cell covers two vertical source pixels (hence the /2 factor).
+// The global scale factor multiplies the resulting dimensions.
 func calculateSize(img image.Image, width, height int, isTGP bool) (int, int) {
 	imgW := img.Bounds().Dx()
 	imgH := img.Bounds().Dy()
@@ -259,6 +274,18 @@ func calculateSize(img image.Image, width, height int, isTGP bool) (int, int) {
 			height = int(math.Round(float64(imgH) * float64(width) / float64(imgW) / 2))
 		}
 	}
+
+	if scale != 1 {
+		width = int(math.Round(float64(width) * scale))
+		height = int(math.Round(float64(height) * scale))
+		if width < 1 {
+			width = 1
+		}
+		if height < 1 {
+			height = 1
+		}
+	}
+
 	return width, height
 }
 
@@ -350,14 +377,26 @@ func calculateTGPSize(imgW, imgH, w, h, termW, termH, statusLines int) (int, int
 		}
 	}
 
+	// Apply the user-supplied scale factor.
+	if scale != 1 {
+		w = int(math.Round(float64(w) * scale))
+		h = int(math.Round(float64(h) * scale))
+		if w < 1 {
+			w = 1
+		}
+		if h < 1 {
+			h = 1
+		}
+	}
+
 	// Clamp explicit pixel dimensions to the terminal size so an oversized
 	// request (e.g. --width 100000) cannot produce a huge image.
 	if w > termPixelW || h > termPixelH {
 		if w > 0 && h > 0 && imgW > 0 && imgH > 0 {
-			scale := math.Min(float64(termPixelW)/float64(w), float64(termPixelH)/float64(h))
-			if scale < 1 {
-				w = int(math.Round(float64(w) * scale))
-				h = int(math.Round(float64(h) * scale))
+			fitScale := math.Min(float64(termPixelW)/float64(w), float64(termPixelH)/float64(h))
+			if fitScale < 1 {
+				w = int(math.Round(float64(w) * fitScale))
+				h = int(math.Round(float64(h) * fitScale))
 			}
 		} else if w > termPixelW {
 			w = termPixelW
@@ -372,22 +411,28 @@ func calculateTGPSize(imgW, imgH, w, h, termW, termH, statusLines int) (int, int
 // printTGP prints image in iTerm2/Kitty using inline image protocol
 const chunkSize = 4096
 
-func printTGP(img image.Image, width, height int, rotate int, invert bool) {
-	term := os.Getenv("TERM_PROGRAM")
-
+// prepareImage applies rotation, inversion and resizing, returning the image
+// ready for protocol-specific encoding. When width or height is <= 0 the image
+// is only rotated/inverted (no resize).
+func prepareImage(img image.Image, width, height, rotate int, invert bool) image.Image {
 	img = rotateImage(img, rotate)
-
 	if invert {
 		img = imaging.Invert(img)
 	}
-
-	// Resize the image to the specified width and height
-	// Note: Kitty/Ghostty terminal graphics can take dimensions from PNG metadata,
-	// but resizing is useful to control display size manually
-	resized := imaging.Resize(img, width, height, imaging.Lanczos)
-	if resized == nil {
-		log.Fatalf("Failed to resize image: result is nil")
+	if width > 0 && height > 0 {
+		resized := imaging.Resize(img, width, height, imaging.Lanczos)
+		if resized == nil {
+			log.Fatalf("Failed to resize image: result is nil")
+		}
+		return resized
 	}
+	return img
+}
+
+func printTGP(img image.Image, width, height int, rotate int, invert bool) {
+	term := os.Getenv("TERM_PROGRAM")
+
+	resized := prepareImage(img, width, height, rotate, invert)
 
 	// Encode the resized image into PNG format
 	buf := new(bytes.Buffer)
@@ -430,20 +475,11 @@ func printTGPKitty(data string) {
 	fmt.Print("\n")
 }
 
+// printSixel renders the image through the Sixel graphics protocol, which is
+// supported by xterm, mlterm, WezTerm and Ghostty. It requires a Sixel-capable
+// terminal; see sixelSupported for the guard used by callers.
 func printSixel(img image.Image, width, height int, rotate int, invert bool) {
-	img = rotateImage(img, rotate)
-
-	if invert {
-		img = imaging.Invert(img)
-	}
-
-	resized := img
-	if width > 0 && height > 0 {
-		resized = imaging.Resize(img, width, height, imaging.Lanczos)
-		if resized == nil {
-			log.Fatalf("Failed to resize image for sixel")
-		}
-	}
+	resized := prepareImage(img, width, height, rotate, invert)
 
 	enc := sixel.NewEncoder(os.Stdout)
 	enc.Width = width
@@ -456,7 +492,12 @@ func printSixel(img image.Image, width, height int, rotate int, invert bool) {
 	}
 }
 
-// renderTerminal returns terminal representation lines
+// renderTerminal converts the image into a slice of ANSI escape-coded strings,
+// one per terminal row. It uses the half-block character (▀) so that each cell
+// shows two vertical source pixels (top in the foreground color, bottom in the
+// background color). The image is therefore resized to width x (height*2) so
+// that one character row maps to two pixel rows. Dithering, when enabled, is
+// applied before resizing.
 func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 	img = rotateImage(img, r.rotate)
 
@@ -944,6 +985,10 @@ func validateFlags() {
 	if width > maxWidth || height > maxHeight {
 		log.Fatalf("Width or height too large: width=%d height=%d (max %d)", width, height, maxWidth)
 	}
+
+	if scale <= 0 {
+		log.Fatalf("Invalid scale: %v (must be > 0)", scale)
+	}
 }
 
 // loadImage loads image from clipboard, input, stdin, or file argument
@@ -1178,6 +1223,7 @@ func main() {
 	rootCmd.Flags().IntVarP(&rotate, "rotate", "r", 0, "Rotate: 0,90,180,270,360")
 	rootCmd.Flags().BoolVarP(&fit, "fit", "f", false, "Fit to terminal size")
 	rootCmd.Flags().BoolVarP(&dither, "dither", "d", false, "Apply Floyd-Steinberg dithering")
+	rootCmd.Flags().Float64VarP(&scale, "scale", "S", 1.0, "Scale factor (e.g. 0.5, 2); multiplies the computed size")
 	rootCmd.Flags().BoolVarP(&interactive, "interactive", "I", false, "Interactive mode with navigation and zoom")
 	rootCmd.Flags().BoolVarP(&qr, "qr", "", false, "Show QR code for donation")
 	rootCmd.Flags().StringVar(&input, "input", "", "Input file (use - for stdin)")

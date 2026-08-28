@@ -142,6 +142,10 @@ pixu image.png --rotate 270
 # Apply Floyd-Steinberg dithering
 pixu image.png --dither
 
+# Scale by a factor (0.5 = half, 2 = double) — multiplies the computed size
+pixu image.png --scale 0.5
+pixu image.png --mode tgp --scale 2
+
 # Combine options
 pixu image.png --rotate 90 --invert --width 60
 ```
