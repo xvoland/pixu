@@ -303,6 +303,19 @@ func rotateImage(img image.Image, degrees int) image.Image {
 	}
 }
 
+// sixelSupported reports whether the current terminal can display the Sixel
+// graphics protocol. Terminals that do not support it silently ignore the
+// escape sequence, which looks like "no output" to the user. We only return
+// false when we are confident the terminal cannot render Sixel; otherwise we
+// let the encoder try so that genuinely capable terminals keep working.
+func sixelSupported() bool {
+	switch os.Getenv("TERM_PROGRAM") {
+	case "iTerm.app", "Apple_Terminal", "Terminal":
+		return false
+	}
+	return true
+}
+
 // calculateTGPSize computes pixel dimensions for TGP display
 func calculateTGPSize(imgW, imgH, w, h, termW, termH, statusLines int) (int, int) {
 	if termW <= 0 || termW > maxWidth {
@@ -328,12 +341,10 @@ func calculateTGPSize(imgW, imgH, w, h, termW, termH, statusLines int) (int, int
 			}
 		}
 	} else if w > 0 && h == 0 {
-		w = w * cellW
 		if imgW > 0 {
 			h = int(math.Round(float64(imgH) * float64(w) / float64(imgW)))
 		}
 	} else if h > 0 && w == 0 {
-		h = h * cellH
 		if imgH > 0 {
 			w = int(math.Round(float64(imgW) * float64(h) / float64(imgH)))
 		}
@@ -999,6 +1010,11 @@ func renderAndOutput(img image.Image) {
 	}
 
 	if mode == "sixel" {
+		if !sixelSupported() {
+			log.Fatalf("Sixel is not supported by this terminal (%s). "+
+				"Use a Sixel-capable terminal (xterm, mlterm, WezTerm, Ghostty) "+
+				"or switch to --mode tgp for iTerm2/Kitty support.", os.Getenv("TERM_PROGRAM"))
+		}
 		termW, termH := getTerminalSize()
 		imgW := img.Bounds().Dx()
 		imgH := img.Bounds().Dy()
