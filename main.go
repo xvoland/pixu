@@ -343,6 +343,55 @@ func sixelSupported() bool {
 	return true
 }
 
+// resolveMode maps the "auto" mode to a concrete rendering mode based on the
+// current terminal's advertised capabilities. Graphics protocols (TGP/Kitty,
+// then Sixel) are preferred for quality; otherwise we fall back to the best
+// text mode supported by the terminal's color depth. Non-auto modes are
+// returned unchanged.
+func resolveMode(m string) string {
+	if m != "auto" {
+		return m
+	}
+
+	termProg := strings.ToLower(os.Getenv("TERM_PROGRAM"))
+	term := strings.ToLower(os.Getenv("TERM"))
+
+	// Kitty / iTerm2 / Ghostty / WezTerm support the TGP (Kitty) protocol.
+	if termProg == "iterm.app" || termProg == "ghostty" || termProg == "wezterm" ||
+		term == "xterm-kitty" || os.Getenv("KITTY_WINDOW_ID") != "" {
+		return "tgp"
+	}
+
+	// Sixel-capable terminals (xterm, mlterm, foot, etc.) when not already
+	// claimed by TGP above.
+	if sixelSupported() {
+		return "sixel"
+	}
+
+	// Text modes, chosen by color depth.
+	if supportsTrueColor() {
+		return "rgb"
+	}
+	if supports256Color() {
+		return "256"
+	}
+	return "grayscale"
+}
+
+// supportsTrueColor reports whether the terminal advertises 24-bit color
+// (via COLORTERM=truecolor|24bit).
+func supportsTrueColor() bool {
+	ct := os.Getenv("COLORTERM")
+	return strings.Contains(ct, "truecolor") || strings.Contains(ct, "24bit")
+}
+
+// supports256Color reports whether the terminal advertises a 256-color palette
+// (via TERM=*-256color or similar).
+func supports256Color() bool {
+	t := os.Getenv("TERM")
+	return strings.Contains(t, "256color") || strings.Contains(t, "256")
+}
+
 // calculateTGPSize computes pixel dimensions for TGP display
 func calculateTGPSize(imgW, imgH, w, h, termW, termH, statusLines int) (int, int) {
 	if termW <= 0 || termW > maxWidth {
@@ -970,10 +1019,11 @@ func pathExists(path string) (bool, error) {
 
 // validateFlags checks all flag values are valid
 func validateFlags() {
-	validModes := map[string]bool{"rgb": true, "grayscale": true, "256": true, "ascii": true, "tgp": true, "sixel": true}
+	validModes := map[string]bool{"rgb": true, "grayscale": true, "256": true, "ascii": true, "tgp": true, "sixel": true, "auto": true}
 	if !validModes[mode] {
-		log.Fatalf("Invalid mode: %q (must be rgb, grayscale, 256, ascii, tgp, or sixel)", mode)
+		log.Fatalf("Invalid mode: %q (must be rgb, grayscale, 256, ascii, tgp, sixel, or auto)", mode)
 	}
+	mode = resolveMode(mode)
 
 	if !isValidRotate(rotate) {
 		log.Fatalf("Invalid rotate value: %d (must be 0, 90, 180, 270, or 360)", rotate)
@@ -1217,7 +1267,7 @@ func main() {
 	// Flags
 	rootCmd.Flags().IntVarP(&height, "height", "h", 0, "Height in characters")
 	rootCmd.Flags().IntVarP(&width, "width", "w", 0, "Width in characters")
-	rootCmd.Flags().StringVarP(&mode, "mode", "m", "rgb", "Mode: rgb/grayscale/ascii/tgp/sixel")
+	rootCmd.Flags().StringVarP(&mode, "mode", "m", "rgb", "Mode: rgb/grayscale/ascii/tgp/sixel/auto")
 	rootCmd.Flags().BoolVarP(&invert, "invert", "i", false, "Invert colors")
 	rootCmd.Flags().StringVarP(&char, "char", "c", "▀", "Block character to use")
 	rootCmd.Flags().IntVarP(&rotate, "rotate", "r", 0, "Rotate: 0,90,180,270,360")

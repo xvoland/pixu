@@ -91,3 +91,61 @@ func TestSixelSupported(t *testing.T) {
 		t.Errorf("ghostty should support sixel")
 	}
 }
+
+func TestResolveMode(t *testing.T) {
+	keys := []string{"TERM_PROGRAM", "TERM", "KITTY_WINDOW_ID", "COLORTERM"}
+	orig := make(map[string]string, len(keys))
+	for _, k := range keys {
+		if v, ok := os.LookupEnv(k); ok {
+			orig[k] = v
+		}
+	}
+	defer func() {
+		for _, k := range keys {
+			if v, ok := orig[k]; ok {
+				os.Setenv(k, v)
+			} else {
+				os.Unsetenv(k)
+			}
+		}
+	}()
+
+	set := func(termProg, term, kitty, color string) {
+		os.Setenv("TERM_PROGRAM", termProg)
+		os.Setenv("TERM", term)
+		if kitty == "" {
+			os.Unsetenv("KITTY_WINDOW_ID")
+		} else {
+			os.Setenv("KITTY_WINDOW_ID", kitty)
+		}
+		os.Setenv("COLORTERM", color)
+	}
+
+	cases := []struct {
+		name, termProg, term, kitty, color, want string
+	}{
+		{"iterm", "iTerm.app", "xterm-256color", "", "", "tgp"},
+		{"ghostty", "ghostty", "xterm-256color", "", "", "tgp"},
+		{"wezterm", "WezTerm", "xterm-256color", "", "", "tgp"},
+		{"kitty-term", "", "xterm-kitty", "", "", "tgp"},
+		{"kitty-env", "", "xterm", "1", "", "tgp"},
+		{"foot-sixel", "foot", "foot", "", "", "sixel"},
+		{"xterm-sixel", "xterm", "xterm", "", "", "sixel"},
+		{"apple-truecolor", "Apple_Terminal", "xterm-256color", "", "truecolor", "rgb"},
+		{"terminal-256", "Terminal", "xterm-256color", "", "", "256"},
+		{"terminal-basic", "Terminal", "xterm", "", "", "grayscale"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			set(c.termProg, c.term, c.kitty, c.color)
+			if got := resolveMode("auto"); got != c.want {
+				t.Errorf("resolveMode(auto) = %q, want %q", got, c.want)
+			}
+		})
+	}
+
+	// non-auto modes are returned unchanged
+	if got := resolveMode("sixel"); got != "sixel" {
+		t.Errorf("resolveMode(sixel) should be unchanged, got %q", got)
+	}
+}

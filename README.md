@@ -103,6 +103,9 @@ pixu photo.jpg --mode tgp
 
 # Display using Sixel protocol (xterm, mlterm)
 pixu photo.jpg --mode sixel
+
+# Auto-select the best mode for the current terminal
+pixu photo.jpg --mode auto
 ```
 
 ### Resizing
@@ -247,10 +250,26 @@ export PIXU_CELL_HEIGHT=20
 | `ascii` | Plain ASCII art | All terminals |
 | `tgp` | Terminal Graphics Protocol (iTerm2/Kitty) | iTerm2, Kitty, Ghostty, WezTerm |
 | `sixel` | Sixel graphics protocol | xterm, mlterm, RLogin, TinyTERM |
+| `auto` | Pick the best mode for the current terminal | Detected automatically |
 
 > **Note:** Sixel requires a Sixel-capable terminal (xterm, mlterm, WezTerm, Ghostty).
 > On unsupported terminals (iTerm2, Terminal.app) `pixu` prints a clear error instead of
 > silently producing no output.
+
+### Auto mode
+
+`--mode auto` (or `-m auto`) selects the highest-quality protocol the current
+terminal supports, without you specifying it:
+
+1. **TGP (Kitty)** — when running in iTerm2, Ghostty, WezTerm, or Kitty
+   (`TERM=xterm-kitty` or `KITTY_WINDOW_ID` set).
+2. **Sixel** — when the terminal is Sixel-capable (xterm, mlterm, foot, …).
+3. **RGB** — when the terminal advertises true color (`COLORTERM=truecolor`).
+4. **256** — when a 256-color palette is available (`TERM=*-256color`).
+5. **grayscale** — as a final fallback.
+
+The resolved mode is the concrete mode, so all other flags behave exactly as if
+you had passed it explicitly.
 
 ## Requirements
 
