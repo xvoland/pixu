@@ -65,6 +65,10 @@ make build-local   # builds the binary to ./bin/pixu
 ./bin/pixu --help
 ```
 
+`make build-local` embeds the git tag into `pixu --version` (e.g. `pixu v1.0.0`).
+A plain `go build` reports `x.x.x (local)`; for the exact `go build -ldflags`
+command see `AGENTS.md`.
+
 ## Quick Start
 
 ```bash
@@ -222,6 +226,8 @@ In interactive mode, use:
 ```bash
 # Show version
 pixu --version
+# pixu v1.0.0, Copyright © 2026, Vitalii Tereshchuk
+# (build source is shown in parentheses only when ahead of a tag)
 
 # Show QR code for donation
 pixu --qr
