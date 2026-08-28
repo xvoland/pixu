@@ -5,9 +5,12 @@ Terminal image viewer written in Go. Renders images directly in terminal using v
 
 ## Build & Run
 ```bash
-go build -o bin/pixu .
+go build -ldflags "-X main.version=$(git describe --tags --abbrev=0 2>/dev/null || echo dev) -X main.buildSource=$(git describe --tags 2>/dev/null || echo local)" -o bin/pixu .
 go run . --help
 ```
+
+The `ldflags` inject the git tag into `--version` (without them `go build` reports
+`x.x.x (local)`). For a release/cross build use `make build` / `make build-local`.
 
 ## QR Code
 QR code image (`qr-code.jpg`) is embedded into the binary via `//go:embed` directive in `main.go`. To update the QR code, replace `qr-code.jpg` in the project root and rebuild. No ldflags needed.
@@ -44,5 +47,5 @@ QR code image (`qr-code.jpg`) is embedded into the binary via `//go:embed` direc
 
 ## Lint & Verify
 ```bash
-go build -o bin/pixu .
+go build -ldflags "-X main.version=$(git describe --tags --abbrev=0 2>/dev/null || echo dev) -X main.buildSource=$(git describe --tags 2>/dev/null || echo local)" -o bin/pixu .
 ```
