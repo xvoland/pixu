@@ -153,6 +153,17 @@ func TestResolveMode(t *testing.T) {
 	}
 }
 
+// newEnvCmd builds a command with the same flags (bound to the same globals)
+// that applyEnvDefaults consults, avoiding a dependency on the package-private
+// rootCmd.
+func newEnvCmd() *cobra.Command {
+	cmd := &cobra.Command{}
+	cmd.Flags().IntVarP(&width, "width", "w", 0, "")
+	cmd.Flags().Float64VarP(&scale, "scale", "S", 1.0, "")
+	cmd.Flags().StringVarP(&mode, "mode", "m", "rgb", "")
+	return cmd
+}
+
 // TestEnvPrecedence verifies the documented priority: CLI flag > env > default.
 // It builds a command with the same flags (bound to the same globals) that
 // applyEnvDefaults consults, avoiding a dependency on the package-private rootCmd.
@@ -161,13 +172,6 @@ func TestEnvPrecedence(t *testing.T) {
 		width = 0
 		scale = 1.0
 		mode = "rgb"
-	}
-	newCmd := func() *cobra.Command {
-		cmd := &cobra.Command{}
-		cmd.Flags().IntVarP(&width, "width", "w", 0, "")
-		cmd.Flags().Float64VarP(&scale, "scale", "S", 1.0, "")
-		cmd.Flags().StringVarP(&mode, "mode", "m", "rgb", "")
-		return cmd
 	}
 	cases := []struct {
 		name, envKey, envVal, args string
@@ -187,7 +191,7 @@ func TestEnvPrecedence(t *testing.T) {
 			os.Setenv(c.envKey, c.envVal)
 			defer os.Unsetenv(c.envKey)
 
-			cmd := newCmd()
+			cmd := newEnvCmd()
 			cmd.ParseFlags(strings.Fields(c.args))
 			applyEnvDefaults(cmd)
 
@@ -195,5 +199,28 @@ func TestEnvPrecedence(t *testing.T) {
 				t.Errorf("got %v, want %v (env=%s=%q args=%q)", got, c.want, c.envKey, c.envVal, c.args)
 			}
 		})
+	}
+}
+
+// TestEnvAbsentKeepsDefault verifies that when no PIXU_* variables are set,
+// applyEnvDefaults leaves the defaults untouched (absent env is a no-op).
+func TestEnvAbsentKeepsDefault(t *testing.T) {
+	for _, k := range []string{"PIXU_WIDTH", "PIXU_SCALE", "PIXU_MODE", "PIXU_INVERT", "PIXU_ROTATE"} {
+		os.Unsetenv(k)
+	}
+
+	width = 0
+	scale = 1.0
+	mode = "rgb"
+	invert = false
+	rotate = 0
+
+	cmd := newEnvCmd()
+	cmd.ParseFlags([]string{})
+	applyEnvDefaults(cmd)
+
+	if width != 0 || scale != 1.0 || mode != "rgb" || invert || rotate != 0 {
+		t.Errorf("absent env should keep defaults: width=%d scale=%v mode=%q invert=%v rotate=%d",
+			width, scale, mode, invert, rotate)
 	}
 }
