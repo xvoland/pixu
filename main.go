@@ -693,17 +693,66 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 			return
 		}
 
+		if mode == "sixel" {
+			if !sixelSupported() {
+				fmt.Printf("\033[7mSixel not supported by this terminal (%s)\033[0m\n", os.Getenv("TERM_PROGRAM"))
+				return
+			}
+			displayW, displayH := calculateTGPSize(imgW, imgH, width, height, termW, termH, statusLinesInteractive)
+			resized := imaging.Resize(img, displayW, displayH, imaging.Lanczos)
+			if resized == nil {
+				fmt.Printf("Error: failed to resize image\n")
+				return
+			}
+			enc := sixel.NewEncoder(os.Stdout)
+			enc.Width = displayW
+			enc.Height = displayH
+			enc.Dither = dither
+			enc.Colors = 256
+			if err := enc.Encode(resized); err != nil {
+				fmt.Printf("Error encoding sixel: %v\n", err)
+				return
+			}
+			_, cellH := getCellSize()
+			termRowH := displayH/cellH + 3
+			fmt.Printf("\r\033[%dH\033[7m%s | %dx%d | SIXEL | %d/%d\033[0m\n",
+				termRowH, filepath.Base(files[currentIndex]), imgW, imgH, currentIndex+1, len(files))
+			fmt.Printf("\033[%dH\033[33m←/→: prev/next | ESC/Ctrl+C: quit\033[0m\n", termRowH+1)
+			return
+		}
+
 		displayW := termW
 		var displayH int
-		if imgW > 0 {
-			displayH = termW * imgH / imgW / 2
+		if width > 0 && height == 0 {
+			displayW = width
+			if imgW > 0 {
+				displayH = width * imgH / imgW / 2
+			}
+		} else if height > 0 && width == 0 {
+			displayH = height
+			if imgH > 0 {
+				displayW = height * 2 * imgW / imgH
+			}
+		} else if width > 0 && height > 0 {
+			displayW = width
+			displayH = height
 		} else {
-			displayH = termH - statusLinesTerminal
+			if imgW > 0 {
+				displayH = termW * imgH / imgW / 2
+			} else {
+				displayH = termH - statusLinesTerminal
+			}
 		}
 
 		if imgW > 0 && displayH > termH-statusLinesTerminal {
 			displayH = termH - statusLinesTerminal
 			displayW = displayH * 2 * imgW / imgH
+		}
+		if displayW > termW {
+			displayW = termW
+			if imgW > 0 {
+				displayH = displayW * imgH / imgW / 2
+			}
 		}
 
 		renderer := &ImageRenderer{
@@ -749,12 +798,10 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 
 	oldState, err := term.MakeRaw(int(tty.Fd()))
 	if err != nil {
-		tty.Close()
 		fmt.Println("Error: cannot set raw mode")
 		return
 	}
 	defer term.Restore(int(tty.Fd()), oldState)
-	defer tty.Close()
 
 	for {
 		buf := make([]byte, 10)
