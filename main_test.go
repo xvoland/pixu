@@ -3,7 +3,10 @@ package main
 import (
 	"image"
 	"os"
+	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 func TestRgbTo256GrayscaleRamp(t *testing.T) {
@@ -147,5 +150,50 @@ func TestResolveMode(t *testing.T) {
 	// non-auto modes are returned unchanged
 	if got := resolveMode("sixel"); got != "sixel" {
 		t.Errorf("resolveMode(sixel) should be unchanged, got %q", got)
+	}
+}
+
+// TestEnvPrecedence verifies the documented priority: CLI flag > env > default.
+// It builds a command with the same flags (bound to the same globals) that
+// applyEnvDefaults consults, avoiding a dependency on the package-private rootCmd.
+func TestEnvPrecedence(t *testing.T) {
+	reset := func() {
+		width = 0
+		scale = 1.0
+		mode = "rgb"
+	}
+	newCmd := func() *cobra.Command {
+		cmd := &cobra.Command{}
+		cmd.Flags().IntVarP(&width, "width", "w", 0, "")
+		cmd.Flags().Float64VarP(&scale, "scale", "S", 1.0, "")
+		cmd.Flags().StringVarP(&mode, "mode", "m", "rgb", "")
+		return cmd
+	}
+	cases := []struct {
+		name, envKey, envVal, args string
+		get  func() interface{}
+		want interface{}
+	}{
+		{"width-flag-wins", "PIXU_WIDTH", "111", "-w 999", func() interface{} { return width }, 999},
+		{"width-env-only", "PIXU_WIDTH", "222", "", func() interface{} { return width }, 222},
+		{"scale-flag-wins", "PIXU_SCALE", "0.5", "-S 3", func() interface{} { return scale }, 3.0},
+		{"scale-env-only", "PIXU_SCALE", "0.5", "", func() interface{} { return scale }, 0.5},
+		{"mode-flag-wins", "PIXU_MODE", "auto", "-m sixel", func() interface{} { return mode }, "sixel"},
+		{"mode-env-only", "PIXU_MODE", "auto", "", func() interface{} { return mode }, "auto"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			reset()
+			os.Setenv(c.envKey, c.envVal)
+			defer os.Unsetenv(c.envKey)
+
+			cmd := newCmd()
+			cmd.ParseFlags(strings.Fields(c.args))
+			applyEnvDefaults(cmd)
+
+			if got := c.get(); got != c.want {
+				t.Errorf("got %v, want %v (env=%s=%q args=%q)", got, c.want, c.envKey, c.envVal, c.args)
+			}
+		})
 	}
 }
