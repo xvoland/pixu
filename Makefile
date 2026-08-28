@@ -18,8 +18,9 @@ LDFLAGS := -X main.version=$(VERSION) -X main.buildSource=$(BUILD_SOURCE)
 all: clean build
 
 build-local:
+	@mkdir -p $(BIN_DIR)
 	@echo "Building $(APP_NAME) $(VERSION)..."
-	@CGO_ENABLED=1 go build -ldflags "$(LDFLAGS)" -o $(APP_NAME) .
+	@CGO_ENABLED=1 go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(APP_NAME) .
 
 build:
 	@mkdir -p $(BIN_DIR)
@@ -38,4 +39,4 @@ clean:
 .PHONY: qr
 
 qr:
-	@./pixu --qr
+	@$(BIN_DIR)/$(APP_NAME) --qr

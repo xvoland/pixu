@@ -61,7 +61,8 @@ curl -sL https://github.com/xvoland/pixu/releases/latest/download/pixu-windows-a
 ```bash
 git clone https://github.com/xvoland/pixu.git
 cd pixu
-make build-local
+make build-local   # builds the binary to ./bin/pixu
+./bin/pixu --help
 ```
 
 ## Quick Start
@@ -243,6 +244,10 @@ export PIXU_CELL_HEIGHT=20
 | `tgp` | Terminal Graphics Protocol (iTerm2/Kitty) | iTerm2, Kitty, Ghostty, WezTerm |
 | `sixel` | Sixel graphics protocol | xterm, mlterm, RLogin, TinyTERM |
 
+> **Note:** Sixel requires a Sixel-capable terminal (xterm, mlterm, WezTerm, Ghostty).
+> On unsupported terminals (iTerm2, Terminal.app) `pixu` prints a clear error instead of
+> silently producing no output.
+
 ## Requirements
 
 - Go 1.25 or later (for building from source)
@@ -300,6 +305,87 @@ for img in *.jpg *.png *.gif; do
 done
 ```
 
+## Practical Examples
+
+Ready-to-use recipes that combine the options above.
+
+### Preview a photo in true color
+
+```bash
+pixu photo.jpg
+```
+
+### Fit an image to your terminal (any mode)
+
+```bash
+pixu photo.jpg --fit
+pixu photo.jpg --mode tgp --fit
+pixu photo.jpg --mode sixel --fit
+```
+
+### Browse a folder interactively
+
+```bash
+pixu ./vacation --interactive
+pixu ./vacation --interactive --mode tgp
+pixu ./vacation --interactive --mode sixel --width 1000
+```
+
+### Paste a screenshot straight from the clipboard
+
+```bash
+pixu --paste
+pixu --paste --mode ascii
+```
+
+### Turn a logo into ASCII art for a README
+
+```bash
+pixu logo.png --mode ascii --width 80 --output logo.txt
+```
+
+### Custom ASCII ramp (dark to light)
+
+```bash
+pixu x.png --mode ascii --char " .:-=+*#%@"
+```
+
+### Invert, rotate and dither a scanned document
+
+```bash
+pixu scan.png --rotate 90 --invert --dither
+```
+
+### Use Sixel in a capable terminal (xterm, mlterm, WezTerm, Ghostty)
+
+```bash
+pixu diagram.png --mode sixel --width 1200
+```
+
+### Persist settings via environment variables
+
+```bash
+export PIXU_MODE=tgp
+export PIXU_WIDTH=120
+export PIXU_ASCII_CHARS=" .:-=+*#%@"
+pixu art.png
+```
+
+### Dimensions: pixels vs columns
+
+In `tgp`/`sixel` modes `--width`/`--height` are **pixel** dimensions:
+
+```bash
+pixu img.png --mode tgp --width 800 --height 600
+```
+
+In text modes (`rgb`/`grayscale`/`256`/`ascii`) they are **character columns**
+(1 column ≈ 1 source pixel before block rendering):
+
+```bash
+pixu img.png --width 80
+```
+
 ## Troubleshooting
 
 ### Image not displaying correctly
@@ -311,8 +397,9 @@ done
 
 ### Wrong aspect ratio
 
-- Use `--fit` to automatically fit terminal
+- Use `--fit` to automatically fit the terminal (works for all modes, including `tgp` and `sixel`)
 - Adjust `--width` and `--height`
+- In `tgp`/`sixel` modes `--width`/`--height` are pixel dimensions; in text modes they are character columns
 - Set custom cell size: `PIXU_CELL_WIDTH=12 PIXU_CELL_HEIGHT=24`
 
 ### Performance

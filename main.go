@@ -349,6 +349,23 @@ func calculateTGPSize(imgW, imgH, w, h, termW, termH, statusLines int) (int, int
 			w = int(math.Round(float64(imgW) * float64(h) / float64(imgH)))
 		}
 	}
+
+	// Clamp explicit pixel dimensions to the terminal size so an oversized
+	// request (e.g. --width 100000) cannot produce a huge image.
+	if w > termPixelW || h > termPixelH {
+		if w > 0 && h > 0 && imgW > 0 && imgH > 0 {
+			scale := math.Min(float64(termPixelW)/float64(w), float64(termPixelH)/float64(h))
+			if scale < 1 {
+				w = int(math.Round(float64(w) * scale))
+				h = int(math.Round(float64(h) * scale))
+			}
+		} else if w > termPixelW {
+			w = termPixelW
+		} else if h > termPixelH {
+			h = termPixelH
+		}
+	}
+
 	return w, h
 }
 
@@ -1047,6 +1064,19 @@ func loadImage(args []string) image.Image {
 
 // renderAndOutput renders the image and writes to output
 func renderAndOutput(img image.Image) {
+	if fit {
+		if tw, th := getTerminalSize(); tw > 0 {
+			if mode == "tgp" || mode == "sixel" {
+				cellW, cellH := getCellSize()
+				width = tw * cellW
+				height = (th - statusLinesTGP) * cellH
+			} else {
+				width = tw
+				height = th - statusLinesTerminal
+			}
+		}
+	}
+
 	if mode == "tgp" {
 		termW, termH := getTerminalSize()
 		imgW := img.Bounds().Dx()
@@ -1068,13 +1098,6 @@ func renderAndOutput(img image.Image) {
 		sixelW, sixelH := calculateTGPSize(imgW, imgH, width, height, termW, termH, statusLinesTGP)
 		printSixel(img, sixelW, sixelH, rotate, invert)
 		return
-	}
-
-	if fit {
-		if tw, th := getTerminalSize(); tw > 0 {
-			width = tw
-			height = th - statusLinesTerminal
-		}
 	}
 
 	scaleWidth, scaleHeight := calculateSize(img, width, height, false)
