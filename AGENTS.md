@@ -10,7 +10,18 @@ go run . --help
 ```
 
 The `ldflags` inject the git tag into `--version` (without them `go build` reports
-`x.x.x (local)`). For a release/cross build use `make build` / `make build-local`.
+`x.x.x (local)`). For a local single-binary build use `make build-local` (outputs to
+`bin/`). For a release cross-build of every platform use `make dist` (outputs to `dist/`).
+
+### Release builds (`make dist`)
+- `make dist` — builds all platforms into `dist/`.
+- `make dist-windows` / `make dist-linux` / `make dist-darwin` — one OS only.
+- `make dist/pixu-<os>-<arch>[.exe]` — a single binary, e.g.
+  `make dist/pixu-windows-amd64.exe` or `make dist/pixu-darwin-arm64`.
+- Binaries in `dist/` are gitignored; keep the folder marker `dist/.gitkeep`.
+
+Platforms: `windows/amd64`, `windows/arm64`, `linux/amd64`, `linux/arm64`,
+`linux/arm`, `darwin/amd64`, `darwin/arm64`.
 
 ## QR Code
 QR code image (`qr-code.jpg`) is embedded into the binary via `//go:embed` directive in `main.go`. To update the QR code, replace `qr-code.jpg` in the project root and rebuild. No ldflags needed.
@@ -30,10 +41,10 @@ QR code image (`qr-code.jpg`) is embedded into the binary via `//go:embed` direc
 - `github.com/mattn/go-sixel` — Sixel graphics protocol for xterm/mlterm
 
 ## Platform Notes
-- **macOS**: CGo required for clipboard image support (NSPasteboard). Photoshop puts images as TIFF, not PNG — `clipboard_darwin.m` handles this via NSImage fallback. Because of CGo, release cross-builds (`make build`) set `CGO_ENABLED=1` for darwin targets; darwin binaries must be built on macOS (or with osxcross).
+- **macOS**: CGo required for clipboard image support (NSPasteboard). Photoshop puts images as TIFF, not PNG — `clipboard_darwin.m` handles this via NSImage fallback. Because of CGo, release cross-builds (`make dist`) set `CGO_ENABLED=1` for darwin targets; darwin binaries must be built on macOS (or with osxcross).
 - **Linux**: Clipboard uses `golang.design/x/clipboard` (X11); needs `libx11` at runtime. Wayland is not supported (XWayland only).
 - **Windows**: No CGo needed for clipboard.
-- **Cross-compilation**: `make build` builds all platforms in one pass with per-OS CGO (darwin=1, others=0). It works from a macOS host; building darwin binaries from Linux/Windows requires osxcross.
+- **Cross-compilation**: `make dist` builds all platforms in one pass with per-OS CGO (darwin=1, others=0). It works from a macOS host; building darwin binaries from Linux/Windows requires osxcross.
 
 ## Code Conventions
 - Comments in English only

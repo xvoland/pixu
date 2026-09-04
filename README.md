@@ -69,6 +69,29 @@ make build-local   # builds the binary to ./bin/pixu
 A plain `go build` reports `x.x.x (local)`; for the exact `go build -ldflags`
 command see `AGENTS.md`.
 
+### Building for distribution
+
+`make dist` cross-builds every platform into the `dist/` folder (binaries are
+gitignored; the `dist/.gitkeep` marker is kept):
+
+```bash
+make dist                 # build all platforms -> dist/
+make dist-windows         # windows/amd64 + windows/arm64
+make dist-linux           # linux/amd64 + linux/arm64 + linux/arm
+make dist-darwin          # darwin/amd64 + darwin/arm64 (requires macOS + CGo)
+make dist/pixu-darwin-arm64          # a single binary
+make dist/pixu-windows-amd64.exe      # a single Windows binary
+```
+
+| Platform | Output in `dist/` |
+|----------|-------------------|
+| Windows  | `pixu-windows-amd64.exe`, `pixu-windows-arm64.exe` |
+| Linux    | `pixu-linux-amd64`, `pixu-linux-arm64`, `pixu-linux-arm` |
+| macOS    | `pixu-darwin-amd64`, `pixu-darwin-arm64` |
+
+`darwin` targets need `CGO_ENABLED=1` and must be built on macOS (or with
+osxcross); all other targets are pure-Go.
+
 ## Quick Start
 
 ```bash
@@ -226,8 +249,13 @@ In interactive mode, use:
 ```bash
 # Show version
 pixu --version
-# pixu v1.1.0, Copyright © 2026, Vitalii Tereshchuk
-# (build source is shown in parentheses only when ahead of a tag)
+# PIXU, v1.1.0 | https://dotoca.net/pixu
+# (c) 2026, Vitalii Tereshchuk | xVoLAnD. All rights reserved.
+
+# The same banner is shown by the `version` subcommand and when pixu is run
+# without arguments (replacing the previous help screen):
+pixu
+pixu version
 
 # Show QR code for donation
 pixu --qr
@@ -276,6 +304,30 @@ terminal supports, without you specifying it:
 
 The resolved mode is the concrete mode, so all other flags behave exactly as if
 you had passed it explicitly.
+
+## Performance
+
+PIXU's hot path is the text-mode renderer and the Floyd-Steinberg dithering
+pass. v1.1.0 includes a performance pass measured with `go test -bench` +
+`benchstat` (Apple M2 Pro, 400x400 image):
+
+- **Text rendering** (`rgb` / `256` / `grayscale` / `ascii`): pixels are read
+  directly from the `*image.NRGBA` buffer that `imaging.Resize` returns, avoiding
+  the per-pixel `image.At` interface dispatch and `color.Color` boxing, and the
+  ANSI escape sequences are assembled with `strings.Builder` instead of
+  `fmt.Fprintf`. Render-time allocations drop ~97% (≈4181 → 137 per RGB render)
+  and CPU time by 10–38%.
+- **Floyd-Steinberg dithering** (`--dither`): the three `[][]float64` row buffers
+  were replaced by two flat `[]float64` buffers (current + next row) with direct
+  pixel access. Allocations drop from ~321k to 4 per image and runtime by ~64%.
+- **`rgbTo256` color mapping**: pure integer arithmetic replacing
+  `math.Max` / `math.Abs` / `math.Round`, byte-identical to the previous
+  float implementation.
+- **Output**: `renderAndOutput` and the interactive viewer buffer the whole frame
+  and write it with a single syscall instead of one `fmt.Fprintln` per line.
+
+The dithering pass is now fast enough for large images; prefer a smaller
+`--width` only when you just need a quick preview of a very large source.
 
 ## Requirements
 
@@ -436,8 +488,8 @@ pixu img.png --width 80
 
 ### Performance
 
-- Use smaller `--width` for faster rendering
-- Disable dithering (`--dither` can be slow on large images)
+- Use a smaller `--width` for a faster preview of very large images
+- The dithering pass (`--dither`) is optimized in v1.1.0 (≈64% faster, ~321k → 4 allocations); it is fine for typical images
 
 ### Clipboard (`--paste`) not working
 

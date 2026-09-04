@@ -1,0 +1,2 @@
+# Release binaries built by `make dist` are written here.
+# Ignored by .gitignore; see Makefile.

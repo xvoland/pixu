@@ -3,6 +3,10 @@ pixu
 /bin/
 *.exe
 
+# Release binaries (built by `make dist`); keep the folder marker.
+/dist/*.exe
+/dist/pixu-*
+
 # IDE
 .idea/
 .vscode/
