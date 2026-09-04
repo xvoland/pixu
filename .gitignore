@@ -6,6 +6,7 @@ pixu
 # Release binaries (built by `make dist`); keep the folder marker.
 /dist/*.exe
 /dist/pixu-*
+.images/
 
 # IDE
 .idea/
