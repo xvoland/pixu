@@ -38,12 +38,11 @@
 ### Homebrew
 
 ```bash
-# Install directly from the formula in the repository
-brew install --formula https://raw.githubusercontent.com/xvoland/pixu/master/Formula/pixu.rb
-
-# Or, after cloning the repo:
-#   brew install --formula Formula/pixu.rb
+brew tap xvoland/pixu
+brew install pixu
 ```
+
+The formula lives in the `xvoland/homebrew-pixu` tap.
 
 ### From Source
 
