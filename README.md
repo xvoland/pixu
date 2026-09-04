@@ -469,6 +469,31 @@ In text modes (`rgb`/`grayscale`/`256`/`ascii`) they are **character columns**
 pixu img.png --width 80
 ```
 
+## Shell Completion
+
+PIXU ships a built-in `completion` command (provided by Cobra) that generates
+autocompletion scripts for bash, zsh, fish, and PowerShell. Generate the script
+for your shell and source it from your shell's startup file:
+
+```bash
+# bash
+pixu completion bash > /usr/local/etc/bash_completion.d/pixu   # or ~/.bash_completion
+source /usr/local/etc/bash_completion.d/pixu
+
+# zsh
+pixu completion zsh > ~/.zsh/completions/_pixu
+# make sure ~/.zsh/completions is in your $fpath (or use the path the script prints)
+
+# fish
+pixu completion fish > ~/.config/fish/completions/pixu.fish
+
+# PowerShell
+pixu completion powershell > pixu.ps1   # then dot-source it from your $PROFILE
+```
+
+Once loaded, press `Tab` to complete commands, flags (e.g. `--mode`), and flag
+values.
+
 ## Troubleshooting
 
 ### Image not displaying correctly
