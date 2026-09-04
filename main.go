@@ -1422,6 +1422,20 @@ func main() {
 			applyEnvDefaults(cmd)
 		},
 		Run: func(cmd *cobra.Command, args []string) {
+			// pflag's NoOptDefVal makes --fit's value optional; when given as
+			// --fit W (space) it leaves "W" as a stray positional instead of
+			// consuming it as the value. Recover the axis from that token so both
+			// --fit W and --fit=W work, while bare --fit still means by-height.
+			if cmd.Flags().Changed("fit") && fit == "H" {
+				for i, a := range args {
+					if a == "W" || a == "H" {
+						fit = a
+						args = append(args[:i], args[i+1:]...)
+						break
+					}
+				}
+			}
+
 			if showVersion {
 				printInfo()
 				return
@@ -1461,7 +1475,9 @@ func main() {
 	rootCmd.Flags().BoolVarP(&invert, "invert", "i", false, "Invert colors")
 	rootCmd.Flags().StringVarP(&char, "char", "c", "▀", "Block character to use")
 	rootCmd.Flags().IntVarP(&rotate, "rotate", "r", 0, "Rotate: 0,90,180,270,360")
-	rootCmd.Flags().StringVarP(&fit, "fit", "f", "", "Fit to terminal size: H=by height (default), W=by width. Scale separately with --scale (e.g. --fit H --scale 2)")
+	rootCmd.Flags().StringVarP(&fit, "fit", "f", "", "Fit to terminal size: H=by height (default; bare --fit also fits by height), W=by width. Scale separately with --scale (e.g. --fit H --scale 2)")
+	// Bare --fit (no value) means fit by height.
+	rootCmd.Flags().Lookup("fit").NoOptDefVal = "H"
 	rootCmd.Flags().BoolVarP(&dither, "dither", "d", false, "Apply Floyd-Steinberg dithering")
 	rootCmd.Flags().Float64VarP(&scale, "scale", "S", 1.0, "Scale factor (e.g. 0.5, 2); multiplies the computed size")
 	rootCmd.Flags().BoolVarP(&interactive, "interactive", "I", false, "Interactive mode with navigation and zoom")

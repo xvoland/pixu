@@ -148,12 +148,13 @@ pixu image.png --height 40
 pixu image.png --width 100 --height 50
 
 # Fit to terminal size
-pixu image.png --fit H
+pixu image.png --fit        # fit by height (bare --fit = by height)
+pixu image.png --fit H      # fit by height
 
 # The chosen axis fills the whole terminal and the other dimension follows the
 # image aspect ratio (so the image may extend past the terminal on that axis).
 # --fit H stretches to the terminal height; --fit W to the terminal width:
-pixu image.png --fit H   # stretch to terminal height (default)
+pixu image.png --fit H   # stretch to terminal height
 pixu image.png --fit W   # stretch to terminal width
 
 # --fit only selects the axis; scaling is done separately with --scale
