@@ -103,4 +103,4 @@ jobs:
           git config user.email "ci@xvoland.dev"
           git config user.name "pixu-ci"
           git add Formula/pixu.rb
-          git diff --quiet && echo "formula already up to date" || (git commit -m "pixu ${{ github.ref_name }}" && git push)
+          git diff --cached --quiet && echo "formula already up to date" || (git commit -m "pixu ${{ github.ref_name }}" && git push)
