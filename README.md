@@ -156,11 +156,10 @@ pixu image.png --fit H
 pixu image.png --fit H   # stretch to terminal height (default)
 pixu image.png --fit W   # stretch to terminal width
 
-# A number is a scale factor applied to the fitted size (1 = full terminal fit,
-# 0.5 = half, 3 = three times larger); width and height are both multiplied:
-pixu image.png --fit 1     # full size
-pixu image.png --fit 0.5   # half size
-pixu image.png --fit 3     # three times larger
+# --fit only selects the axis; scaling is done separately with --scale
+# (which multiplies the computed size, including the fitted one):
+pixu image.png --fit H --scale 2     # fit by height, then double
+pixu image.png --fit W --scale 0.5   # fit by width, then halve
 
 # With TGP mode
 pixu image.png --mode tgp --width 800 --height 600
