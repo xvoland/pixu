@@ -569,3 +569,5 @@ Homepage: https://dotoca.net/pixu
 GitHub: https://github.com/xvoland/pixu
 
 Donation: https://paypal.me/xvoland
+
+<img src="https://raw.githubusercontent.com/xvoland/pixu/refs/heads/master/images/qr.png" class="center">
