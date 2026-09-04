@@ -2,7 +2,7 @@
 
 <p align="center">
   <a href="https://dotoca.net/pixu">
-    <img src="https://dotoca.net/pixu/logo.png" alt="PIXU logo" width="200" height="200">
+    <img src="https://raw.githubusercontent.com/xvoland/xvoland/main/images/pixu.svg" alt="PIXU logo" width="200" height="200">
   </a>
 </p>
 
