@@ -24,7 +24,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"image"
-	"image/color"
 	_ "image/gif"
 	_ "image/jpeg"
 	"image/png"
@@ -125,27 +124,52 @@ type ImageRenderer struct {
 	dither        bool
 }
 
-// rgbTo256 converts RGB to 256-color terminal code with grayscale ramp
+// rgbTo256 converts RGB to 256-color terminal code with grayscale ramp.
+// It uses pure integer arithmetic: the original float64 rounding
+// (round(avg*23/255) and round(c*5/255)) is replaced by the equivalent
+// round-half-up integer formula (2*x+255)/510, which avoids per-pixel float
+// conversions and math.Max/math.Abs calls on the hot render path.
 func rgbTo256(r, g, b uint8) int {
-	// check if the color is close to grayscale
-	rF, gF, bF := float64(r), float64(g), float64(b)
-	avg := (rF + gF + bF) / 3
-	maxDiff := math.Max(math.Abs(rF-avg), math.Max(math.Abs(gF-avg), math.Abs(bF-avg)))
+	ri, gi, bi := int(r), int(g), int(b)
+	sum := ri + gi + bi
+
+	// Grayscale detection: a colour is "close to grayscale" when each channel is
+	// within 10 of the mean. |c - (r+g+b)/3| <= 10 is exactly equivalent to
+	// |3c - (r+g+b)| <= 30, so the threshold stays exact in integer arithmetic
+	// (originally computed with float64).
+	maxDiff3 := 3*ri - sum
+	if maxDiff3 < 0 {
+		maxDiff3 = -maxDiff3
+	}
+	d := 3*gi - sum
+	if d < 0 {
+		d = -d
+	}
+	if d > maxDiff3 {
+		maxDiff3 = d
+	}
+	d = 3*bi - sum
+	if d < 0 {
+		d = -d
+	}
+	if d > maxDiff3 {
+		maxDiff3 = d
+	}
 
 	// if all channels are within ~10 of each other, use grayscale ramp (232-255)
-	if maxDiff <= 10 {
-		gray := int(math.Round(avg / 255 * 23))
-		if gray < 0 {
-			gray = 0
-		} else if gray > 23 {
+	if maxDiff3 <= 30 {
+		// gray = round((sum/3) * 23 / 255), computed exactly in integers so the
+		// result matches the original math.Round(float64) implementation.
+		gray := (46*sum + 765) / 1530
+		if gray > 23 {
 			gray = 23
 		}
 		return 232 + gray
 	}
 
-	r6 := int(math.Round(float64(r) * 5 / 255))
-	g6 := int(math.Round(float64(g) * 5 / 255))
-	b6 := int(math.Round(float64(b) * 5 / 255))
+	r6 := (ri*10 + 255) / 510
+	g6 := (gi*10 + 255) / 510
+	b6 := (bi*10 + 255) / 510
 	if r6 > 5 {
 		r6 = 5
 	}
@@ -177,24 +201,40 @@ func applyFloydSteinberg(img image.Image) image.Image {
 	// quantize to 6 levels per channel (matches 256-color cube)
 	const levels = 6
 
-	errR := make([][]float64, h)
-	errG := make([][]float64, h)
-	errB := make([][]float64, h)
-	for i := 0; i < h; i++ {
-		errR[i] = make([]float64, w+2)
-		errG[i] = make([]float64, w+2)
-		errB[i] = make([]float64, w+2)
-	}
+	// Read the source pixels directly when the concrete type is known, to avoid
+	// the per-pixel interface dispatch of img.At.
+	srcNRGBA, _ := img.(*image.NRGBA)
+	srcRGBA, _ := img.(*image.RGBA)
 
-	newImg := image.NewRGBA(bounds)
+	newImg := image.NewNRGBA(bounds)
+
+	// Two flat error buffers (current row + next row), each holding R, G and B
+	// segments of length w+2. Flat slices replace the previous [][]float64
+	// (h separate allocations per channel) and keep the working set contiguous
+	// for better cache locality.
+	span := w + 2
+	errCur := make([]float64, span*3)
+	errNext := make([]float64, span*3)
+	oR, oG, oB := 0, span, span*2
 
 	for y := 0; y < h; y++ {
+		rowBase := (bounds.Min.Y+y)*newImg.Stride + bounds.Min.X*4
 		for x := 0; x < w; x++ {
-			r, g, b, a := img.At(x+bounds.Min.X, y+bounds.Min.Y).RGBA()
+			var r0, g0, b0 uint8
+			if srcNRGBA != nil {
+				i := (bounds.Min.Y+y)*srcNRGBA.Stride + (bounds.Min.X+x)*4
+				r0, g0, b0 = srcNRGBA.Pix[i], srcNRGBA.Pix[i+1], srcNRGBA.Pix[i+2]
+			} else if srcRGBA != nil {
+				i := (bounds.Min.Y+y)*srcRGBA.Stride + (bounds.Min.X+x)*4
+				r0, g0, b0 = srcRGBA.Pix[i], srcRGBA.Pix[i+1], srcRGBA.Pix[i+2]
+			} else {
+				rr, gg, bb, _ := img.At(bounds.Min.X+x, bounds.Min.Y+y).RGBA()
+				r0, g0, b0 = uint8(rr>>8), uint8(gg>>8), uint8(bb>>8)
+			}
 
-			oldR := float64(r>>8) + errR[y][x]
-			oldG := float64(g>>8) + errG[y][x]
-			oldB := float64(b>>8) + errB[y][x]
+			oldR := float64(r0) + errCur[oR+x]
+			oldG := float64(g0) + errCur[oG+x]
+			oldB := float64(b0) + errCur[oB+x]
 
 			if oldR > 255 {
 				oldR = 255
@@ -216,34 +256,39 @@ func applyFloydSteinberg(img image.Image) image.Image {
 			newG := quantize(oldG, levels)
 			newB := quantize(oldB, levels)
 
-			newImg.Set(x+bounds.Min.X, y+bounds.Min.Y, color.RGBA{
-				R: uint8(newR), G: uint8(newG), B: uint8(newB), A: uint8(a >> 8),
-			})
+			i := rowBase + x*4
+			newImg.Pix[i] = uint8(newR)
+			newImg.Pix[i+1] = uint8(newG)
+			newImg.Pix[i+2] = uint8(newB)
+			newImg.Pix[i+3] = 255
 
 			diffR := oldR - newR
 			diffG := oldG - newG
 			diffB := oldB - newB
 
+			// right (current row)
+			errCur[oR+x+1] += diffR * 7 / 16
+			errCur[oG+x+1] += diffG * 7 / 16
+			errCur[oB+x+1] += diffB * 7 / 16
+			// down-left / down / down-right (next row)
+			if x > 0 {
+				errNext[oR+x-1] += diffR * 3 / 16
+				errNext[oG+x-1] += diffG * 3 / 16
+				errNext[oB+x-1] += diffB * 3 / 16
+			}
+			errNext[oR+x] += diffR * 5 / 16
+			errNext[oG+x] += diffG * 5 / 16
+			errNext[oB+x] += diffB * 5 / 16
 			if x+1 < w {
-				errR[y][x+1] += diffR * 7 / 16
-				errG[y][x+1] += diffG * 7 / 16
-				errB[y][x+1] += diffB * 7 / 16
+				errNext[oR+x+1] += diffR * 1 / 16
+				errNext[oG+x+1] += diffG * 1 / 16
+				errNext[oB+x+1] += diffB * 1 / 16
 			}
-			if y+1 < h {
-				if x > 0 {
-					errR[y+1][x-1] += diffR * 3 / 16
-					errG[y+1][x-1] += diffG * 3 / 16
-					errB[y+1][x-1] += diffB * 3 / 16
-				}
-				errR[y+1][x] += diffR * 5 / 16
-				errG[y+1][x] += diffG * 5 / 16
-				errB[y+1][x] += diffB * 5 / 16
-				if x+1 < w {
-					errR[y+1][x+1] += diffR * 1 / 16
-					errG[y+1][x+1] += diffG * 1 / 16
-					errB[y+1][x+1] += diffB * 1 / 16
-				}
-			}
+		}
+		// The next row becomes the current row; the now-stale buffer is cleared.
+		errCur, errNext = errNext, errCur
+		for k := range errNext {
+			errNext[k] = 0
 		}
 	}
 
@@ -564,33 +609,56 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 		img = applyFloydSteinberg(img)
 	}
 
+	// imaging.Resize always returns *image.NRGBA, so we can read its pixels
+	// directly without the per-pixel interface dispatch of resized.At.
 	resized := imaging.Resize(img, r.width, r.height*2, imaging.Lanczos)
+	rgba := resized
 	bounds := resized.Bounds()
-	lines := make([]string, 0, bounds.Dy()/2)
+	minX, minY := bounds.Min.X, bounds.Min.Y
+	dx, dy := bounds.Dx(), bounds.Dy()
+	lines := make([]string, 0, dy/2)
 
-	for y := bounds.Min.Y; y < bounds.Max.Y; y += 2 {
+	// Resolve the draw character and the ascii ramp once, outside the pixel loop.
+	charToUse := r.char
+	if charToUse == "" {
+		charToUse = "▀"
+	}
+
+	var asciiRunes []rune
+	if r.mode == "ascii" {
+		chars := r.asciiChars
+		if r.char != "" && r.char != "▀" {
+			chars = r.char
+		}
+		if len(chars) == 0 {
+			chars = "@"
+		}
+		asciiRunes = []rune(chars)
+	}
+
+	// buf is reused for integer-to-ASCII conversion of escape-sequence numbers;
+	// strings.Builder copies the bytes on Write, so the buffer is safe to reuse.
+	var buf [16]byte
+	for y := minY; y < minY+dy; y += 2 {
 		var sb strings.Builder
-		sb.Grow(bounds.Dx() * 30)
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			topColor := resized.At(x, y)
-			bottomColor := topColor
-			if y+1 < bounds.Max.Y {
-				bottomColor = resized.At(x, y+1)
+		sb.Grow(dx * 30)
+		rowBelow := y + 1
+		for x := minX; x < minX+dx; x++ {
+			var tr8, tg8, tb8, br8, bg8, bb8 uint8
+			// Direct pixel access avoids the per-pixel interface dispatch
+			// and color.Color boxing that resized.At(x, y) would incur.
+			i := y*rgba.Stride + x*4
+			tr8, tg8, tb8 = rgba.Pix[i], rgba.Pix[i+1], rgba.Pix[i+2]
+			if rowBelow < minY+dy {
+				j := rowBelow*rgba.Stride + x*4
+				br8, bg8, bb8 = rgba.Pix[j], rgba.Pix[j+1], rgba.Pix[j+2]
+			} else {
+				br8, bg8, bb8 = tr8, tg8, tb8
 			}
-
-			tr, tg, tb, _ := topColor.RGBA()
-			br, bg, bb, _ := bottomColor.RGBA()
-			tr8, tg8, tb8 := uint8(tr>>8), uint8(tg>>8), uint8(tb>>8)
-			br8, bg8, bb8 := uint8(br>>8), uint8(bg>>8), uint8(bb>>8)
 
 			if r.invert {
 				tr8, tg8, tb8 = 255-tr8, 255-tg8, 255-tb8
 				br8, bg8, bb8 = 255-br8, 255-bg8, 255-bb8
-			}
-
-			charToUse := r.char
-			if charToUse == "" {
-				charToUse = "▀"
 			}
 
 			switch r.mode {
@@ -598,30 +666,50 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 				grayTop := 0.299*float64(tr8) + 0.587*float64(tg8) + 0.114*float64(tb8)
 				grayBottom := 0.299*float64(br8) + 0.587*float64(bg8) + 0.114*float64(bb8)
 				avgGray := (grayTop + grayBottom) / 2
-
-				chars := r.asciiChars
-				if r.char != "" && r.char != "▀" {
-					chars = r.char
+				index := int(avgGray * float64(len(asciiRunes)) / 255)
+				if index >= len(asciiRunes) {
+					index = len(asciiRunes) - 1
 				}
-
-				if len(chars) == 0 {
-					chars = "@"
-				}
-
-				runes := []rune(chars)
-				index := int(avgGray / 255 * float64(len(runes)))
-				if index >= len(runes) {
-					index = len(runes) - 1
-				}
-				sb.WriteString(string(runes[index]))
+				sb.WriteRune(asciiRunes[index])
 			case "256":
-				fmt.Fprintf(&sb, "\033[38;5;%d;48;5;%dm%s", rgbTo256(tr8, tg8, tb8), rgbTo256(br8, bg8, bb8), charToUse)
+				sb.WriteString("\033[38;5;")
+				sb.Write(strconv.AppendInt(buf[:0], int64(rgbTo256(tr8, tg8, tb8)), 10))
+				sb.WriteString(";48;5;")
+				sb.Write(strconv.AppendInt(buf[:0], int64(rgbTo256(br8, bg8, bb8)), 10))
+				sb.WriteByte('m')
+				sb.WriteString(charToUse)
 			case "grayscale":
 				grayTop := uint8(0.299*float64(tr8) + 0.587*float64(tg8) + 0.114*float64(tb8))
 				grayBottom := uint8(0.299*float64(br8) + 0.587*float64(bg8) + 0.114*float64(bb8))
-				fmt.Fprintf(&sb, "\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s", grayTop, grayTop, grayTop, grayBottom, grayBottom, grayBottom, charToUse)
+				sb.WriteString("\033[38;2;")
+				sb.Write(strconv.AppendInt(buf[:0], int64(grayTop), 10))
+				sb.WriteByte(';')
+				sb.Write(strconv.AppendInt(buf[:0], int64(grayTop), 10))
+				sb.WriteByte(';')
+				sb.Write(strconv.AppendInt(buf[:0], int64(grayTop), 10))
+				sb.WriteString(";48;2;")
+				sb.Write(strconv.AppendInt(buf[:0], int64(grayBottom), 10))
+				sb.WriteByte(';')
+				sb.Write(strconv.AppendInt(buf[:0], int64(grayBottom), 10))
+				sb.WriteByte(';')
+				sb.Write(strconv.AppendInt(buf[:0], int64(grayBottom), 10))
+				sb.WriteByte('m')
+				sb.WriteString(charToUse)
 			default: // rgb
-				fmt.Fprintf(&sb, "\033[38;2;%d;%d;%d;48;2;%d;%d;%dm%s", tr8, tg8, tb8, br8, bg8, bb8, charToUse)
+				sb.WriteString("\033[38;2;")
+				sb.Write(strconv.AppendInt(buf[:0], int64(tr8), 10))
+				sb.WriteByte(';')
+				sb.Write(strconv.AppendInt(buf[:0], int64(tg8), 10))
+				sb.WriteByte(';')
+				sb.Write(strconv.AppendInt(buf[:0], int64(tb8), 10))
+				sb.WriteString(";48;2;")
+				sb.Write(strconv.AppendInt(buf[:0], int64(br8), 10))
+				sb.WriteByte(';')
+				sb.Write(strconv.AppendInt(buf[:0], int64(bg8), 10))
+				sb.WriteByte(';')
+				sb.Write(strconv.AppendInt(buf[:0], int64(bb8), 10))
+				sb.WriteByte('m')
+				sb.WriteString(charToUse)
 			}
 		}
 
@@ -907,16 +995,20 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 		lines := renderer.renderTerminal(img)
 		dispH := len(lines)
 
-		fmt.Print("\033[1;0H")
+		// Assemble the whole frame (image rows + status lines) into one buffer and
+		// write it to the terminal in a single call instead of many fmt.Print
+		// syscalls per navigation redraw.
+		var buf bytes.Buffer
+		buf.WriteString("\033[1;0H")
 		for _, line := range lines {
-			fmt.Print("\r")
-			fmt.Println(line)
+			buf.WriteByte('\r')
+			buf.WriteString(line)
+			buf.WriteByte('\n')
 		}
-
-		fmt.Print("\r")
-		fmt.Printf("\033[%dH\033[7m%s | %dx%d | %s | %d/%d\033[0m\n",
+		fmt.Fprintf(&buf, "\r\033[%dH\033[7m%s | %dx%d | %s | %d/%d\033[0m\n",
 			dispH+1, filepath.Base(files[currentIndex]), imgW, imgH, strings.ToUpper(mode), currentIndex+1, len(files))
-		fmt.Printf("\033[%dH\033[33m←/→: prev/next | ESC/Ctrl+C: quit\033[0m\n", dispH+2)
+		fmt.Fprintf(&buf, "\r\033[%dH\033[33m←/→: prev/next | ESC/Ctrl+C: quit\033[0m\n", dispH+2)
+		os.Stdout.Write(buf.Bytes())
 	}
 
 	showImage()
@@ -1188,21 +1280,24 @@ func loadImage(args []string) image.Image {
 
 // renderAndOutput renders the image and writes to output
 func renderAndOutput(img image.Image) {
+	// Determine the terminal size once and reuse it across the fit logic and the
+	// protocol-specific size calculations instead of querying it repeatedly.
+	termW, termH := getTerminalSize()
+
 	if fit {
-		if tw, th := getTerminalSize(); tw > 0 {
+		if termW > 0 {
 			if mode == "tgp" || mode == "sixel" {
 				cellW, cellH := getCellSize()
-				width = tw * cellW
-				height = (th - statusLinesTGP) * cellH
+				width = termW * cellW
+				height = (termH - statusLinesTGP) * cellH
 			} else {
-				width = tw
-				height = th - statusLinesTerminal
+				width = termW
+				height = termH - statusLinesTerminal
 			}
 		}
 	}
 
 	if mode == "tgp" {
-		termW, termH := getTerminalSize()
 		imgW := img.Bounds().Dx()
 		imgH := img.Bounds().Dy()
 		tgpW, tgpH := calculateTGPSize(imgW, imgH, width, height, termW, termH, statusLinesTGP)
@@ -1216,7 +1311,6 @@ func renderAndOutput(img image.Image) {
 				"Use a Sixel-capable terminal (xterm, mlterm, WezTerm, Ghostty) "+
 				"or switch to --mode tgp for iTerm2/Kitty support.", os.Getenv("TERM_PROGRAM"))
 		}
-		termW, termH := getTerminalSize()
 		imgW := img.Bounds().Dx()
 		imgH := img.Bounds().Dy()
 		sixelW, sixelH := calculateTGPSize(imgW, imgH, width, height, termW, termH, statusLinesTGP)
@@ -1247,8 +1341,15 @@ func renderAndOutput(img image.Image) {
 		outputWriter = f
 	}
 
+	// Buffer every rendered line and issue a single write instead of one
+	// fmt.Fprintln per line, cutting the number of syscalls on the output path.
+	var buf bytes.Buffer
 	for _, line := range renderer.renderTerminal(img) {
-		fmt.Fprintln(outputWriter, line)
+		buf.WriteString(line)
+		buf.WriteByte('\n')
+	}
+	if _, err := outputWriter.Write(buf.Bytes()); err != nil {
+		log.Fatalf("Error writing output: %v", err)
 	}
 }
 
