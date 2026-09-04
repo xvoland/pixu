@@ -42,7 +42,8 @@ brew tap xvoland/pixu
 brew install pixu
 ```
 
-The formula lives in the `xvoland/homebrew-pixu` tap.
+The formula lives in the `xvoland/homebrew-pixu` tap. The first install may
+prompt you to trust the tap; answer yes or run `brew trust xvoland/pixu` first.
 
 ### From Source
 
