@@ -1413,11 +1413,57 @@ func renderAndOutput(img image.Image) {
 	}
 }
 
+// numericValue is a pflag.Value for numeric flags (int or float) that reports a
+// friendly error when the value is not a number, instead of leaking strconv
+// internals (e.g. `strconv.ParseFloat: parsing "H"`) to the user.
+type numericValue struct {
+	name  string
+	isInt bool
+	destI *int
+	destF *float64
+}
+
+func (n numericValue) String() string {
+	if n.isInt {
+		return strconv.Itoa(*n.destI)
+	}
+	return strconv.FormatFloat(*n.destF, 'f', -1, 64)
+}
+
+func (n numericValue) Set(val string) error {
+	if n.isInt {
+		v, err := strconv.Atoi(val)
+		if err != nil {
+			return fmt.Errorf("invalid value %q for --%s: expected a whole number", val, n.name)
+		}
+		*n.destI = v
+		return nil
+	}
+	v, err := strconv.ParseFloat(val, 64)
+	if err != nil {
+		return fmt.Errorf("invalid value %q for --%s: expected a number (e.g. 2 or 0.5)", val, n.name)
+	}
+	*n.destF = v
+	return nil
+}
+
+func (n numericValue) Type() string {
+	if n.isInt {
+		return "int"
+	}
+	return "float"
+}
+
 func main() {
+	// Print user-facing errors as plain messages without a timestamp prefix.
+	log.SetFlags(0)
 
 	rootCmd := &cobra.Command{
 		Use:  "pixu",
 		Args: cobra.ArbitraryArgs,
+		// Don't dump the full flag list on a parse error; the message says enough.
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			applyEnvDefaults(cmd)
 		},
@@ -1469,17 +1515,17 @@ func main() {
 	rootCmd.PersistentFlags().Bool("help", false, "")
 
 	// Flags
-	rootCmd.Flags().IntVarP(&height, "height", "h", 0, "Height in characters")
-	rootCmd.Flags().IntVarP(&width, "width", "w", 0, "Width in characters")
+	rootCmd.Flags().VarP(numericValue{name: "height", isInt: true, destI: &height}, "height", "h", "Height in characters")
+	rootCmd.Flags().VarP(numericValue{name: "width", isInt: true, destI: &width}, "width", "w", "Width in characters")
 	rootCmd.Flags().StringVarP(&mode, "mode", "m", "rgb", "Mode: rgb/grayscale/ascii/tgp/sixel/auto")
 	rootCmd.Flags().BoolVarP(&invert, "invert", "i", false, "Invert colors")
 	rootCmd.Flags().StringVarP(&char, "char", "c", "▀", "Block character to use")
-	rootCmd.Flags().IntVarP(&rotate, "rotate", "r", 0, "Rotate: 0,90,180,270,360")
+	rootCmd.Flags().VarP(numericValue{name: "rotate", isInt: true, destI: &rotate}, "rotate", "r", "Rotate: 0,90,180,270,360")
 	rootCmd.Flags().StringVarP(&fit, "fit", "f", "", "Fit to terminal size: H=by height (default; bare --fit also fits by height), W=by width. Scale separately with --scale (e.g. --fit H --scale 2)")
 	// Bare --fit (no value) means fit by height.
 	rootCmd.Flags().Lookup("fit").NoOptDefVal = "H"
 	rootCmd.Flags().BoolVarP(&dither, "dither", "d", false, "Apply Floyd-Steinberg dithering")
-	rootCmd.Flags().Float64VarP(&scale, "scale", "S", 1.0, "Scale factor (e.g. 0.5, 2); multiplies the computed size")
+	rootCmd.Flags().VarP(numericValue{name: "scale", isInt: false, destF: &scale}, "scale", "S", "Scale factor (e.g. 2 or 0.5); multiplies the computed size")
 	rootCmd.Flags().BoolVarP(&interactive, "interactive", "I", false, "Interactive mode with navigation and zoom")
 	rootCmd.Flags().BoolVarP(&qr, "qr", "", false, "Show QR code for donation")
 	rootCmd.Flags().StringVar(&input, "input", "", "Input file (use - for stdin)")
@@ -1498,7 +1544,14 @@ func main() {
 	rootCmd.AddCommand(versionCmd)
 
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
+		msg := err.Error()
+		// pflag wraps our friendly value error as
+		// `invalid argument "X" for "--flag" flag: <our message>`; keep only the
+		// part we authored so the user sees a clear, human message.
+		if i := strings.Index(msg, "flag: "); i >= 0 {
+			msg = msg[i+len("flag: "):]
+		}
+		fmt.Fprintf(os.Stderr, "Error: %s\n", msg)
 		os.Exit(1)
 	}
 }
