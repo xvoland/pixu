@@ -23,6 +23,8 @@
 
 > PIXU is a powerful terminal image viewer that renders images directly in your terminal using various protocols and formats.
 
+<img src="https://raw.githubusercontent.com/xvoland/pixu/refs/heads/master/images/screen01.png" class="center">
+
 ## Features
 
 - **Multiple rendering modes**: RGB, Grayscale, 256-color, ASCII art, TGP (iTerm2/Kitty), and Sixel — or `--mode auto` to pick the best one for the current terminal
@@ -118,6 +120,8 @@ pixu image.png --mode tgp
 pixu image.png --fit H
 ```
 
+<img src="https://raw.githubusercontent.com/xvoland/pixu/refs/heads/master/images/screen02.png" class="center">
+
 ## Usage
 
 ### Basic Examples
@@ -202,6 +206,8 @@ pixu image.png --mode tgp --scale 2
 pixu image.png --rotate 90 --invert --width 60
 ```
 
+<img src="https://raw.githubusercontent.com/xvoland/pixu/refs/heads/master/images/screen04.png" class="center">
+
 ### Custom Characters
 
 ```bash
@@ -214,6 +220,8 @@ pixu image.png --mode ascii --char "@#%*+=-:. "
 # Use different character for RGB mode
 pixu image.png --char "▓"
 ```
+
+<img src="https://raw.githubusercontent.com/xvoland/pixu/refs/heads/master/images/screen03.png" class="center">
 
 ### Input Sources
 
@@ -311,6 +319,8 @@ export PIXU_CELL_HEIGHT=20
 > **Note:** Sixel requires a Sixel-capable terminal (xterm, mlterm, WezTerm, Ghostty).
 > On unsupported terminals (iTerm2, Terminal.app) `pixu` prints a clear error instead of
 > silently producing no output.
+
+<img src="https://raw.githubusercontent.com/xvoland/pixu/refs/heads/master/images/screen05.png" class="center">
 
 ### Auto mode
 
