@@ -6,39 +6,28 @@ pixu - Terminal Image Viewer
 License: PolyForm Noncommercial License 1.0.0 (see the LICENSE file).
 
 ----------------------------------------------------------------------
-НЕКОММЕРЧЕСКОЕ ИСПОЛЬЗОВАНИЕ
+NONCOMMERCIAL USE
 ----------------------------------------------------------------------
-Разрешено бесплатно для любых некоммерческих целей в рамках условий
-лицензии PolyForm Noncommercial License 1.0.0 (файл LICENSE).
-
-----------------------------------------------------------------------
-КОММЕРЧЕСКОЕ ИСПОЛЬЗОВАНИЕ
-----------------------------------------------------------------------
-Любое коммерческое использование требует ОТДЕЛЬНОЙ КОММЕРЧЕСКОЙ
-ЛИЦЕНЗИИ, полученной у правообладателя. В частности, коммерческим
-считается использование, направленное преимущественно на извлечение
-коммерческой выгоды или денежной компенсации, включая, но не
-ограничиваясь:
-
-  - использование внутри коммерческих организаций в коммерческих целях;
-  - включение в платные продукты, сервисы или распределения;
-  - предоставление как части платного хостинга/SaaS;
-  - любое иное использование с целью получения прибыли.
-
-Без отдельной коммерческой лицензии такое использование запрещено.
-
-----------------------------------------------------------------------
-ЗАПРОС КОММЕРЧЕСКОЙ ЛИЦЕНЗИИ
-----------------------------------------------------------------------
-  DOTOCA.NET - https://dotoca.net
-  Vitalii Tereshchuk
+Free for any noncommercial purpose, within the terms of the PolyForm
+Noncommercial License 1.0.0 (see the LICENSE file).
 
 ----------------------------------------------------------------------
 COMMERCIAL USE
 ----------------------------------------------------------------------
-Commercial use requires a separate commercial license from the copyright
-holder. See LICENSE (PolyForm Noncommercial License 1.0.0).
+Any commercial use requires a SEPARATE COMMERCIAL LICENSE obtained from
+the copyright holder. "Commercial use" means use that is primarily
+intended for, or directed toward, commercial advantage or monetary
+compensation, including but not limited to:
 
-To request a commercial license, contact:
+  - use within commercial organizations for commercial purposes;
+  - inclusion in paid products, services, or distributions;
+  - offering as part of a paid hosting / SaaS;
+  - any other use aimed at generating profit.
+
+Without a separate commercial license, such use is prohibited.
+
+----------------------------------------------------------------------
+REQUEST A COMMERCIAL LICENSE
+----------------------------------------------------------------------
   DOTOCA.NET - https://dotoca.net
   Vitalii Tereshchuk
