@@ -2,7 +2,7 @@
 
 <p align="center">
   <a href="https://dotoca.net/pixu">
-    <img src="https://raw.githubusercontent.com/xvoland/xvoland/main/images/pixu.svg" alt="PIXU logo" width="200" height="200">
+    <img src="https://raw.githubusercontent.com/xvoland/xvoland/main/images/pixu.png" alt="PIXU logo" width="200" height="200">
   </a>
 </p>
 
@@ -554,6 +554,8 @@ Licensed under the PolyForm Noncommercial License 1.0.0. Noncommercial use is fr
 
 Copyright © 2026, [Vitalii Tereshchuk](https://dotoca.net)
 
-- Homepage: https://dotoca.net/pixu
-- GitHub: https://github.com/xvoland/pixu
-- Donation: https://paypal.me/xvoland
+Homepage: https://dotoca.net/pixu
+
+GitHub: https://github.com/xvoland/pixu
+
+Donation: https://paypal.me/xvoland
