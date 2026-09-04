@@ -57,7 +57,7 @@ const defaultVersion = "x.x.x"
 func printInfo() {
 	year := time.Now().Year()
 	fmt.Printf("PIXU, %s | https://dotoca.net/pixu\n", version)
-	fmt.Printf("(c) %d, Vitalii Tereshchuk | xVoLAnD. All rights reserved.\n", year)
+	fmt.Printf("(c) %d, Vitalii Tereshchuk | xVoLAnD. All rights reserved.\n\n", year)
 }
 
 const (
