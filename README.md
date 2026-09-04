@@ -150,6 +150,11 @@ pixu image.png --width 100 --height 50
 # Fit to terminal size
 pixu image.png --fit
 
+# The image keeps its aspect ratio. By default (and with --fit H) it is aligned
+# to the terminal height; use --fit W to align to the width instead:
+pixu image.png --fit H   # fit by height (default)
+pixu image.png --fit W   # fit by width
+
 # With TGP mode
 pixu image.png --mode tgp --width 800 --height 600
 ```
@@ -506,7 +511,7 @@ values.
 
 ### Wrong aspect ratio
 
-- Use `--fit` to automatically fit the terminal (works for all modes, including `tgp` and `sixel`)
+- Use `--fit` to automatically fit the terminal (works for all modes, including `tgp` and `sixel`); `--fit H` aligns to height, `--fit W` to width, the image aspect ratio is preserved
 - Adjust `--width` and `--height`
 - In `tgp`/`sixel` modes `--width`/`--height` are pixel dimensions; in text modes they are character columns
 - Set custom cell size: `PIXU_CELL_WIDTH=12 PIXU_CELL_HEIGHT=24`

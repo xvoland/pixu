@@ -98,7 +98,7 @@ var (
 	char                  string
 	version               = defaultVersion
 	showVersion           bool
-	fit                   bool
+	fit                   string // --fit axis: "H" (by height, default) or "W" (by width)
 	dither                bool
 	interactive           bool
 	qr                    bool
@@ -1279,23 +1279,72 @@ func loadImage(args []string) image.Image {
 	return img
 }
 
+// fitToTerminal computes the render width/height for --fit while preserving the
+// image aspect ratio. axis "W" fits by terminal width, "H" (or empty) fits by
+// terminal height. Text modes render each character row as two vertical pixels
+// (half-block), so the effective pixel height is 2x the row count.
+func fitToTerminal(imgW, imgH, termW, termH int, mode, axis string) (width, height int) {
+	if imgW <= 0 || imgH <= 0 {
+		// Unknown aspect: just fill the available terminal area.
+		if mode == "tgp" || mode == "sixel" {
+			cellW, cellH := getCellSize()
+			return termW * cellW, (termH - statusLinesTGP) * cellH
+		}
+		return termW, termH - statusLinesTerminal
+	}
+
+	if mode == "tgp" || mode == "sixel" {
+		cellW, cellH := getCellSize()
+		termPixelW := termW * cellW
+		termPixelH := (termH - statusLinesTGP) * cellH
+		if axis == "W" {
+			width = termPixelW
+			height = int(math.Round(float64(width) * float64(imgH) / float64(imgW)))
+			if height > termPixelH {
+				height = termPixelH
+				width = int(math.Round(float64(height) * float64(imgW) / float64(imgH)))
+			}
+		} else { // "H" or default: align by height
+			height = termPixelH
+			width = int(math.Round(float64(height) * float64(imgW) / float64(imgH)))
+			if width > termPixelW {
+				width = termPixelW
+				height = int(math.Round(float64(width) * float64(imgH) / float64(imgW)))
+			}
+		}
+		return width, height
+	}
+
+	// Text modes (half-block): one row covers two vertical pixels.
+	availH := termH - statusLinesTerminal
+	if axis == "W" {
+		width = termW
+		height = int(math.Round(float64(width) * float64(imgH) / (2 * float64(imgW))))
+		if height > availH {
+			height = availH
+			width = int(math.Round(2 * float64(height) * float64(imgW) / float64(imgH)))
+		}
+	} else { // "H" or default: align by height
+		height = availH
+		width = int(math.Round(2 * float64(height) * float64(imgW) / float64(imgH)))
+		if width > termW {
+			width = termW
+			height = int(math.Round(float64(width) * float64(imgH) / (2 * float64(imgW))))
+		}
+	}
+	return width, height
+}
+
 // renderAndOutput renders the image and writes to output
 func renderAndOutput(img image.Image) {
 	// Determine the terminal size once and reuse it across the fit logic and the
 	// protocol-specific size calculations instead of querying it repeatedly.
 	termW, termH := getTerminalSize()
 
-	if fit {
-		if termW > 0 {
-			if mode == "tgp" || mode == "sixel" {
-				cellW, cellH := getCellSize()
-				width = termW * cellW
-				height = (termH - statusLinesTGP) * cellH
-			} else {
-				width = termW
-				height = termH - statusLinesTerminal
-			}
-		}
+	if fit != "" {
+		imgW := img.Bounds().Dx()
+		imgH := img.Bounds().Dy()
+		width, height = fitToTerminal(imgW, imgH, termW, termH, mode, fit)
 	}
 
 	if mode == "tgp" {
@@ -1402,7 +1451,9 @@ func main() {
 	rootCmd.Flags().BoolVarP(&invert, "invert", "i", false, "Invert colors")
 	rootCmd.Flags().StringVarP(&char, "char", "c", "▀", "Block character to use")
 	rootCmd.Flags().IntVarP(&rotate, "rotate", "r", 0, "Rotate: 0,90,180,270,360")
-	rootCmd.Flags().BoolVarP(&fit, "fit", "f", false, "Fit to terminal size")
+	rootCmd.Flags().StringVarP(&fit, "fit", "f", "", "Fit to terminal size (H=by height, W=by width; bare --fit fits by height)")
+	// Allow bare --fit (no value) to mean "fit by height".
+	rootCmd.Flags().Lookup("fit").NoOptDefVal = "H"
 	rootCmd.Flags().BoolVarP(&dither, "dither", "d", false, "Apply Floyd-Steinberg dithering")
 	rootCmd.Flags().Float64VarP(&scale, "scale", "S", 1.0, "Scale factor (e.g. 0.5, 2); multiplies the computed size")
 	rootCmd.Flags().BoolVarP(&interactive, "interactive", "I", false, "Interactive mode with navigation and zoom")

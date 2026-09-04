@@ -2,6 +2,7 @@ package main
 
 import (
 	"image"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -222,5 +223,49 @@ func TestEnvAbsentKeepsDefault(t *testing.T) {
 	if width != 0 || scale != 1.0 || mode != "rgb" || invert || rotate != 0 {
 		t.Errorf("absent env should keep defaults: width=%d scale=%v mode=%q invert=%v rotate=%d",
 			width, scale, mode, invert, rotate)
+	}
+}
+
+// TestFitToTerminal verifies that --fit preserves the image aspect ratio and
+// aligns by the requested axis (height by default / "H", width for "W").
+func TestFitToTerminal(t *testing.T) {
+	const (
+		termW = 80
+		termH = 24
+	)
+
+	// Text modes render each row as two vertical pixels, so the effective canvas
+	// aspect is width / (2*height). Both axes must keep it equal to imgW/imgH.
+	checkText := func(axis string, imgW, imgH int) {
+		w, h := fitToTerminal(imgW, imgH, termW, termH, "rgb", axis)
+		got := float64(w) / float64(2*h)
+		want := float64(imgW) / float64(imgH)
+		// Terminal rows are quantized to whole cells (each = 2 vertical pixels),
+		// so a residual error of ~0.1 from rounding is expected and not distortion.
+		if math.Abs(got-want) > 0.1 {
+			t.Errorf("text fit %q %dx%d: canvas aspect %.3f, want ~%.3f (w=%d h=%d)", axis, imgW, imgH, got, want, w, h)
+		}
+		if w > termW {
+			t.Errorf("text fit %q: width %d exceeds termW %d", axis, w, termW)
+		}
+		if h > termH-statusLinesTerminal {
+			t.Errorf("text fit %q: height %d exceeds available %d", axis, h, termH-statusLinesTerminal)
+		}
+	}
+	checkText("H", 200, 200)  // square
+	checkText("W", 200, 200)  // square
+	checkText("H", 300, 100)  // wide
+	checkText("W", 100, 300)  // tall
+
+	// TGP/sixel are pixel dimensions: aspect must equal imgW/imgH.
+	wt, ht := fitToTerminal(300, 100, termW, termH, "tgp", "H")
+	if got, want := float64(wt)/float64(ht), 3.0; math.Abs(got-want) > 0.05 {
+		t.Errorf("tgp fit H: aspect %.3f, want ~3.0 (w=%d h=%d)", got, wt, ht)
+	}
+
+	// Bare/default axis ("") behaves like "H".
+	_, h := fitToTerminal(200, 200, termW, termH, "rgb", "")
+	if h != termH-statusLinesTerminal {
+		t.Errorf("default axis: height=%d, want full available %d", h, termH-statusLinesTerminal)
 	}
 }
