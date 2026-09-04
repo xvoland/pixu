@@ -1,0 +1,23 @@
+name: verify-tap
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone tap with TAP_TOKEN and dry-run push
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+        run: |
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/xvoland/homebrew-pixu.git" /tmp/tap
+          cd /tmp/tap
+          git config user.email ci@xvoland.dev
+          git config user.name pixu-ci
+          git commit --allow-empty -m "verify write access"
+          git push --dry-run origin master
+          echo "OK: TAP_TOKEN has WRITE access to xvoland/homebrew-pixu"
