@@ -494,20 +494,15 @@ func calculateTGPSize(imgW, imgH, w, h, termW, termH, statusLines int) (int, int
 		}
 	}
 
-	// Clamp explicit pixel dimensions to the terminal size so an oversized
-	// request (e.g. --width 100000) cannot produce a huge image.
-	if w > termPixelW || h > termPixelH {
-		if w > 0 && h > 0 && imgW > 0 && imgH > 0 {
-			fitScale := math.Min(float64(termPixelW)/float64(w), float64(termPixelH)/float64(h))
-			if fitScale < 1 {
-				w = int(math.Round(float64(w) * fitScale))
-				h = int(math.Round(float64(h) * fitScale))
-			}
-		} else if w > termPixelW {
-			w = termPixelW
-		} else if h > termPixelH {
-			h = termPixelH
-		}
+	// Cap to a sane absolute maximum so an extreme --scale or --width cannot
+	// produce a gigantic image. Unlike before, this does NOT clamp to the
+	// terminal, so --fit/--scale/--width are free to enlarge the image beyond
+	// the terminal (matching the text/ASCII behaviour).
+	if w > maxWidth {
+		w = maxWidth
+	}
+	if h > maxHeight {
+		h = maxHeight
 	}
 
 	return w, h
@@ -1365,24 +1360,31 @@ func renderAndOutput(img image.Image) {
 		width, height = fitToTerminal(imgW, imgH, termW, termH, mode, axis, scale)
 	}
 
-	if mode == "tgp" {
+	if mode == "tgp" || mode == "sixel" {
 		imgW := img.Bounds().Dx()
 		imgH := img.Bounds().Dy()
-		tgpW, tgpH := calculateTGPSize(imgW, imgH, width, height, termW, termH, statusLinesTGP)
-		printTGP(img, tgpW, tgpH, rotate, invert)
-		return
-	}
-
-	if mode == "sixel" {
+		cellW, cellH := getCellSize()
+		var pxW, pxH int
+		if fit != "" {
+			axis, sc := parseFit(fit)
+			pxW, pxH = fitToTerminal(imgW, imgH, termW, termH, mode, axis, sc)
+		} else {
+			// --width/--height are cell counts; convert to pixels so their visual
+			// size matches the text/ASCII modes (where one column == one cell).
+			pxW = width * cellW
+			pxH = height * cellH
+		}
+		outW, outH := calculateTGPSize(imgW, imgH, pxW, pxH, termW, termH, statusLinesTGP)
+		if mode == "tgp" {
+			printTGP(img, outW, outH, rotate, invert)
+			return
+		}
 		if !sixelSupported() {
 			log.Fatalf("Sixel is not supported by this terminal (%s). "+
 				"Use a Sixel-capable terminal (xterm, mlterm, WezTerm, Ghostty) "+
 				"or switch to --mode tgp for iTerm2/Kitty support.", os.Getenv("TERM_PROGRAM"))
 		}
-		imgW := img.Bounds().Dx()
-		imgH := img.Bounds().Dy()
-		sixelW, sixelH := calculateTGPSize(imgW, imgH, width, height, termW, termH, statusLinesTGP)
-		printSixel(img, sixelW, sixelH, rotate, invert)
+		printSixel(img, outW, outH, rotate, invert)
 		return
 	}
 

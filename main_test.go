@@ -67,10 +67,11 @@ func TestCalculateSizeTGP(t *testing.T) {
 }
 
 func TestCalculateTGPSizeClamp(t *testing.T) {
-	// a huge explicit width must be clamped to the terminal pixel size
+	// An extreme explicit width must be bounded by the absolute maximum, but it
+	// is no longer clamped to the terminal (so fit/scale/width can enlarge).
 	w, _ := calculateTGPSize(100, 100, 100000, 0, 80, 24, statusLinesTGP)
-	if w > 80*cellWidthPxDefault {
-		t.Errorf("width should be clamped to terminal (%d), got %d", 80*cellWidthPxDefault, w)
+	if w != maxWidth {
+		t.Errorf("width should be clamped to maxWidth (%d), got %d", maxWidth, w)
 	}
 }
 
