@@ -1469,9 +1469,7 @@ func main() {
 	rootCmd.Flags().BoolVarP(&invert, "invert", "i", false, "Invert colors")
 	rootCmd.Flags().StringVarP(&char, "char", "c", "▀", "Block character to use")
 	rootCmd.Flags().IntVarP(&rotate, "rotate", "r", 0, "Rotate: 0,90,180,270,360")
-	rootCmd.Flags().StringVarP(&fit, "fit", "f", "", "Fit to terminal size: H=by height, W=by width, or a scale factor (e.g. 0.5); bare --fit fits by height")
-	// Allow bare --fit (no value) to mean "fit by height".
-	rootCmd.Flags().Lookup("fit").NoOptDefVal = "H"
+	rootCmd.Flags().StringVarP(&fit, "fit", "f", "", "Fit to terminal size: H=by height, W=by width, or a number as a scale factor (e.g. --fit 0.5, --fit 3). Bare --fit is not allowed; use --fit H for by-height")
 	rootCmd.Flags().BoolVarP(&dither, "dither", "d", false, "Apply Floyd-Steinberg dithering")
 	rootCmd.Flags().Float64VarP(&scale, "scale", "S", 1.0, "Scale factor (e.g. 0.5, 2); multiplies the computed size")
 	rootCmd.Flags().BoolVarP(&interactive, "interactive", "I", false, "Interactive mode with navigation and zoom")

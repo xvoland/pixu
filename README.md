@@ -105,7 +105,7 @@ pixu image.png --mode ascii
 pixu image.png --mode tgp
 
 # Fit to terminal size
-pixu image.png --fit
+pixu image.png --fit H
 ```
 
 ## Usage
@@ -148,12 +148,11 @@ pixu image.png --height 40
 pixu image.png --width 100 --height 50
 
 # Fit to terminal size
-pixu image.png --fit
+pixu image.png --fit H
 
 # The chosen axis fills the whole terminal and the other dimension follows the
 # image aspect ratio (so the image may extend past the terminal on that axis).
-# By default (and with --fit H) the image is stretched to the terminal height;
-# use --fit W to stretch to the terminal width instead:
+# --fit H stretches to the terminal height; --fit W to the terminal width:
 pixu image.png --fit H   # stretch to terminal height (default)
 pixu image.png --fit W   # stretch to terminal width
 
