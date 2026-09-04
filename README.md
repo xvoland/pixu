@@ -16,8 +16,8 @@
   <a href="https://github.com/xvoland/pixu/releases">
     <img src="https://img.shields.io/github/v/release/xvoland/pixu" alt="Release">
   </a>
-  <a href="https://opensource.org/licenses/Apache-2.0">
-    <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License">
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/License-PolyForm%20NC%201.0.0-blue.svg" alt="License">
   </a>
 </p>
 
@@ -548,7 +548,7 @@ values.
 
 ## License
 
-Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
+Licensed under the PolyForm Noncommercial License 1.0.0. Noncommercial use is free; commercial use requires a separate commercial license from the copyright holder. See [LICENSE](LICENSE) for the full terms and [LICENSE-notice](LICENSE-notice) for details.
 
 ## Author
 
