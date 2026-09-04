@@ -63,7 +63,40 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           files=$(find artifacts -type f ! -name '.gitkeep')
-          gh release create "${GITHUB_REF_NAME}" \
-            --title "${GITHUB_REF_NAME}" \
-            --generate-notes \
-            $files
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} already exists; skipping create."
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --generate-notes \
+              $files
+          fi
+
+  update-tap:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-windows-linux, build-darwin]
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Compute source tarball sha256
+        id: meta
+        run: |
+          url="https://github.com/${{ github.repository }}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+          sha=$(curl -sL "$url" | shasum -a 256 | cut -d' ' -f1)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Update homebrew tap formula
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+        run: |
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/xvoland/homebrew-pixu.git" /tmp/tap
+          cd /tmp/tap
+          sed -i.bak -E "s|^  url \".*\"|  url \"${{ steps.meta.outputs.url }}\"|" Formula/pixu.rb
+          sed -i.bak -E "s|^  sha256 \".*\"|  sha256 \"${{ steps.meta.outputs.sha }}\"|" Formula/pixu.rb
+          sed -i.bak -E "s|^  version \".*\"|  version \"${{ steps.meta.outputs.version }}\"|" Formula/pixu.rb
+          rm -f Formula/pixu.rb.bak
+          git config user.email "ci@xvoland.dev"
+          git config user.name "pixu-ci"
+          git add Formula/pixu.rb
+          git diff --quiet && echo "formula already up to date" || (git commit -m "pixu ${{ github.ref_name }}" && git push)
