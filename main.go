@@ -52,11 +52,12 @@ const defaultVersion = "x.x.x"
 // versionLine returns the version string for display. The build source is shown
 // in parentheses only when it differs from the version (e.g. a dev or dirty
 // build), so a clean release tag reads simply "pixu v1.0.0".
-func versionLine() string {
-	if buildSource != "" && buildSource != version {
-		return fmt.Sprintf("pixu %s (%s)", version, buildSource)
-	}
-	return fmt.Sprintf("pixu %s", version)
+// printInfo prints the project banner shown for --version, the `version`
+// subcommand, and the no-argument case.
+func printInfo() {
+	year := time.Now().Year()
+	fmt.Printf("PIXU, %s | https://dotoca.net/pixu\n", version)
+	fmt.Printf("(c) %d, Vitalii Tereshchuk | xVoLAnD. All rights reserved.\n", year)
 }
 
 const (
@@ -1363,9 +1364,7 @@ func main() {
 		},
 		Run: func(cmd *cobra.Command, args []string) {
 			if showVersion {
-				year := time.Now().Year()
-				fmt.Printf("%s, Copyright © %d, Vitalii Tereshchuk / xVoLAnD\n\n", versionLine(), year)
-				printCopyleftBody()
+				printInfo()
 				return
 			}
 
@@ -1383,7 +1382,7 @@ func main() {
 
 			img := loadImage(args)
 			if img == nil {
-				cmd.Help()
+				printInfo()
 				return
 			}
 
@@ -1417,9 +1416,7 @@ func main() {
 		Use:   "version",
 		Short: "Show version",
 		Run: func(cmd *cobra.Command, args []string) {
-			year := time.Now().Year()
-			fmt.Printf("%s, Copyright © %d, Vitalii Tereshchuk / xVoLAnD\n\n", versionLine(), year)
-			printCopyleftBody()
+			printInfo()
 		},
 	}
 	rootCmd.AddCommand(versionCmd)
