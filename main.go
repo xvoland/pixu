@@ -1383,6 +1383,7 @@ func main() {
 			img := loadImage(args)
 			if img == nil {
 				printInfo()
+				cmd.Help()
 				return
 			}
 
