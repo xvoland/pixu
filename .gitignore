@@ -16,5 +16,4 @@ pixu
 .DS_Store
 Thumbs.db
 
-# QR code resource
-qr-code.jpg
+# QR code resource is embedded via //go:embed and must be committed for builds.
