@@ -65,7 +65,7 @@ make build-local   # builds the binary to ./bin/pixu
 ./bin/pixu --help
 ```
 
-`make build-local` embeds the git tag into `pixu --version` (e.g. `pixu v1.1.0`).
+`make build-local` embeds the git tag into `pixu --version` (e.g. `pixu v1.3.0`).
 A plain `go build` reports `x.x.x (local)`; for the exact `go build -ldflags`
 command see `AGENTS.md`.
 
@@ -150,10 +150,18 @@ pixu image.png --width 100 --height 50
 # Fit to terminal size
 pixu image.png --fit
 
-# The image keeps its aspect ratio. By default (and with --fit H) it is aligned
-# to the terminal height; use --fit W to align to the width instead:
-pixu image.png --fit H   # fit by height (default)
-pixu image.png --fit W   # fit by width
+# The chosen axis fills the whole terminal and the other dimension follows the
+# image aspect ratio (so the image may extend past the terminal on that axis).
+# By default (and with --fit H) the image is stretched to the terminal height;
+# use --fit W to stretch to the terminal width instead:
+pixu image.png --fit H   # stretch to terminal height (default)
+pixu image.png --fit W   # stretch to terminal width
+
+# A number is a scale factor applied to the fitted size (1 = full terminal fit,
+# 0.5 = half, 3 = three times larger); width and height are both multiplied:
+pixu image.png --fit 1     # full size
+pixu image.png --fit 0.5   # half size
+pixu image.png --fit 3     # three times larger
 
 # With TGP mode
 pixu image.png --mode tgp --width 800 --height 600
@@ -254,7 +262,7 @@ In interactive mode, use:
 ```bash
 # Show version
 pixu --version
-# PIXU, v1.1.0 | https://dotoca.net/pixu
+# PIXU, v1.3.0 | https://dotoca.net/pixu
 # (c) 2026, Vitalii Tereshchuk | xVoLAnD. All rights reserved.
 
 # The same banner is shown by the `version` subcommand and when pixu is run

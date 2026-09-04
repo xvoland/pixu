@@ -237,7 +237,7 @@ func TestFitToTerminal(t *testing.T) {
 	// Text modes render each row as two vertical pixels, so the effective canvas
 	// aspect is width / (2*height). Both axes must keep it equal to imgW/imgH.
 	checkText := func(axis string, imgW, imgH int) {
-		w, h := fitToTerminal(imgW, imgH, termW, termH, "rgb", axis)
+		w, h := fitToTerminal(imgW, imgH, termW, termH, "rgb", axis, 1.0)
 		got := float64(w) / float64(2*h)
 		want := float64(imgW) / float64(imgH)
 		// Terminal rows are quantized to whole cells (each = 2 vertical pixels),
@@ -245,27 +245,75 @@ func TestFitToTerminal(t *testing.T) {
 		if math.Abs(got-want) > 0.1 {
 			t.Errorf("text fit %q %dx%d: canvas aspect %.3f, want ~%.3f (w=%d h=%d)", axis, imgW, imgH, got, want, w, h)
 		}
-		if w > termW {
-			t.Errorf("text fit %q: width %d exceeds termW %d", axis, w, termW)
-		}
-		if h > termH-statusLinesTerminal {
-			t.Errorf("text fit %q: height %d exceeds available %d", axis, h, termH-statusLinesTerminal)
+		// The chosen dimension is locked to the full terminal; the other may
+		// overflow (scroll/wrap) and is intentionally not clamped.
+		if axis == "W" {
+			if w != termW {
+				t.Errorf("text fit W %dx%d: width=%d, want full termW %d", imgW, imgH, w, termW)
+			}
+		} else {
+			if h != termH-statusLinesTerminal {
+				t.Errorf("text fit H %dx%d: height=%d, want full available %d", imgW, imgH, h, termH-statusLinesTerminal)
+			}
 		}
 	}
-	checkText("H", 200, 200)  // square
-	checkText("W", 200, 200)  // square
-	checkText("H", 300, 100)  // wide
-	checkText("W", 100, 300)  // tall
+	checkText("H", 200, 200)  // square: fills height
+	checkText("W", 200, 200)  // square: fills width
+	checkText("H", 300, 100)  // wide: fills height, width overflows (ok)
+	checkText("W", 100, 300)  // tall: fills width, height overflows (ok)
 
-	// TGP/sixel are pixel dimensions: aspect must equal imgW/imgH.
-	wt, ht := fitToTerminal(300, 100, termW, termH, "tgp", "H")
+	// TGP/sixel are pixel dimensions: aspect must equal imgW/imgH, and the
+	// chosen axis must fill the terminal.
+	wt, ht := fitToTerminal(300, 100, termW, termH, "tgp", "H", 1.0)
 	if got, want := float64(wt)/float64(ht), 3.0; math.Abs(got-want) > 0.05 {
 		t.Errorf("tgp fit H: aspect %.3f, want ~3.0 (w=%d h=%d)", got, wt, ht)
 	}
+	ww, _ := fitToTerminal(100, 300, termW, termH, "tgp", "W", 1.0)
+	cellW, _ := getCellSize()
+	if ww != termW*cellW {
+		t.Errorf("tgp fit W: width=%d, want full termPixelW %d", ww, termW*cellW)
+	}
+
+	// A scale factor multiplies both dimensions of the fitted size by the same
+	// amount, preserving aspect. --fit 3 should triple width and height.
+	sw, sh := fitToTerminal(200, 200, termW, termH, "rgb", "H", 0.5)
+	// Full H-fit for a square is 40x20 (canvas 40x40); half is 20x10.
+	if sw != 20 || sh != 10 {
+		t.Errorf("text fit H scale 0.5: got %dx%d, want 20x10", sw, sh)
+	}
+	if got, want := float64(sw)/float64(2*sh), 1.0; math.Abs(got-want) > 0.001 {
+		t.Errorf("text fit scale must preserve aspect: got %.3f", got)
+	}
+	fw, fh := fitToTerminal(200, 200, termW, termH, "rgb", "H", 3.0)
+	if fw != 120 || fh != 60 {
+		t.Errorf("text fit H scale 3: got %dx%d, want 120x60", fw, fh)
+	}
 
 	// Bare/default axis ("") behaves like "H".
-	_, h := fitToTerminal(200, 200, termW, termH, "rgb", "")
+	_, h := fitToTerminal(200, 200, termW, termH, "rgb", "", 1.0)
 	if h != termH-statusLinesTerminal {
 		t.Errorf("default axis: height=%d, want full available %d", h, termH-statusLinesTerminal)
+	}
+}
+
+func TestParseFit(t *testing.T) {
+	cases := []struct {
+		in        string
+		wantAxis  string
+		wantScale float64
+	}{
+		{"", "H", 1.0},
+		{"H", "H", 1.0},
+		{"W", "W", 1.0},
+		{"0.5", "H", 0.5},
+		{"1", "H", 1.0},
+		{"1.5", "H", 1.5},
+		{"garbage", "H", 1.0}, // unrecognized -> safe default
+	}
+	for _, c := range cases {
+		axis, scale := parseFit(c.in)
+		if axis != c.wantAxis || scale != c.wantScale {
+			t.Errorf("parseFit(%q) = (%q, %v), want (%q, %v)", c.in, axis, scale, c.wantAxis, c.wantScale)
+		}
 	}
 }

@@ -1281,58 +1281,75 @@ func loadImage(args []string) image.Image {
 
 // fitToTerminal computes the render width/height for --fit while preserving the
 // image aspect ratio. axis "W" fits by terminal width, "H" (or empty) fits by
-// terminal height. Text modes render each character row as two vertical pixels
-// (half-block), so the effective pixel height is 2x the row count.
-func fitToTerminal(imgW, imgH, termW, termH int, mode, axis string) (width, height int) {
+// terminal height. scale is a multiplier applied to the fitted size (1 = full
+// terminal fit, 0.5 = half). Text modes render each character row as two
+// vertical pixels (half-block), so the effective pixel height is 2x the row count.
+func fitToTerminal(imgW, imgH, termW, termH int, mode, axis string, scale float64) (width, height int) {
 	if imgW <= 0 || imgH <= 0 {
 		// Unknown aspect: just fill the available terminal area.
 		if mode == "tgp" || mode == "sixel" {
 			cellW, cellH := getCellSize()
-			return termW * cellW, (termH - statusLinesTGP) * cellH
+			width = termW * cellW
+			height = (termH - statusLinesTGP) * cellH
+		} else {
+			width = termW
+			height = termH - statusLinesTerminal
 		}
-		return termW, termH - statusLinesTerminal
+		return applyFitScale(width, height, scale)
 	}
 
 	if mode == "tgp" || mode == "sixel" {
 		cellW, cellH := getCellSize()
 		termPixelW := termW * cellW
 		termPixelH := (termH - statusLinesTGP) * cellH
+		// Lock the chosen dimension to the terminal; the other follows by aspect
+		// ratio and may overflow (the user explicitly prioritized this axis).
 		if axis == "W" {
 			width = termPixelW
 			height = int(math.Round(float64(width) * float64(imgH) / float64(imgW)))
-			if height > termPixelH {
-				height = termPixelH
-				width = int(math.Round(float64(height) * float64(imgW) / float64(imgH)))
-			}
-		} else { // "H" or default: align by height
+		} else { // "H" or default: fill the height
 			height = termPixelH
 			width = int(math.Round(float64(height) * float64(imgW) / float64(imgH)))
-			if width > termPixelW {
-				width = termPixelW
-				height = int(math.Round(float64(width) * float64(imgH) / float64(imgW)))
-			}
 		}
-		return width, height
+		return applyFitScale(width, height, scale)
 	}
 
 	// Text modes (half-block): one row covers two vertical pixels.
 	availH := termH - statusLinesTerminal
+	// Lock the chosen dimension to the terminal; the other follows by aspect
+	// ratio and may overflow (the user explicitly prioritized this axis).
 	if axis == "W" {
 		width = termW
 		height = int(math.Round(float64(width) * float64(imgH) / (2 * float64(imgW))))
-		if height > availH {
-			height = availH
-			width = int(math.Round(2 * float64(height) * float64(imgW) / float64(imgH)))
-		}
-	} else { // "H" or default: align by height
+	} else { // "H" or default: fill the height
 		height = availH
 		width = int(math.Round(2 * float64(height) * float64(imgW) / float64(imgH)))
-		if width > termW {
-			width = termW
-			height = int(math.Round(float64(width) * float64(imgH) / (2 * float64(imgW))))
-		}
 	}
-	return width, height
+	return applyFitScale(width, height, scale)
+}
+
+// applyFitScale multiplies the fitted width/height by scale (a no-op when scale==1).
+func applyFitScale(width, height int, scale float64) (int, int) {
+	if scale == 1 {
+		return width, height
+	}
+	return int(math.Round(float64(width) * scale)), int(math.Round(float64(height) * scale))
+}
+
+// parseFit interprets the --fit flag value: empty/"H" => fit by height with
+// scale 1, "W" => fit by width with scale 1, and a positive number is a scale
+// factor applied to the fitted size (1 = full terminal fit, 0.5 = half).
+func parseFit(fit string) (axis string, scale float64) {
+	switch strings.TrimSpace(fit) {
+	case "", "H", "h":
+		return "H", 1.0
+	case "W", "w":
+		return "W", 1.0
+	}
+	if s, err := strconv.ParseFloat(strings.TrimSpace(fit), 64); err == nil && s > 0 {
+		return "H", s
+	}
+	return "H", 1.0
 }
 
 // renderAndOutput renders the image and writes to output
@@ -1342,9 +1359,10 @@ func renderAndOutput(img image.Image) {
 	termW, termH := getTerminalSize()
 
 	if fit != "" {
+		axis, scale := parseFit(fit)
 		imgW := img.Bounds().Dx()
 		imgH := img.Bounds().Dy()
-		width, height = fitToTerminal(imgW, imgH, termW, termH, mode, fit)
+		width, height = fitToTerminal(imgW, imgH, termW, termH, mode, axis, scale)
 	}
 
 	if mode == "tgp" {
@@ -1451,7 +1469,7 @@ func main() {
 	rootCmd.Flags().BoolVarP(&invert, "invert", "i", false, "Invert colors")
 	rootCmd.Flags().StringVarP(&char, "char", "c", "▀", "Block character to use")
 	rootCmd.Flags().IntVarP(&rotate, "rotate", "r", 0, "Rotate: 0,90,180,270,360")
-	rootCmd.Flags().StringVarP(&fit, "fit", "f", "", "Fit to terminal size (H=by height, W=by width; bare --fit fits by height)")
+	rootCmd.Flags().StringVarP(&fit, "fit", "f", "", "Fit to terminal size: H=by height, W=by width, or a scale factor (e.g. 0.5); bare --fit fits by height")
 	// Allow bare --fit (no value) to mean "fit by height".
 	rootCmd.Flags().Lookup("fit").NoOptDefVal = "H"
 	rootCmd.Flags().BoolVarP(&dither, "dither", "d", false, "Apply Floyd-Steinberg dithering")
