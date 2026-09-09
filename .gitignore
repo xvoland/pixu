@@ -7,6 +7,7 @@ pixu
 /dist/*.exe
 /dist/pixu-*
 .images/
+_images/
 
 # IDE
 .idea/
