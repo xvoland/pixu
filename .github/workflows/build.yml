@@ -41,6 +41,12 @@ jobs:
           go-version-file: go.mod
       - name: Build macOS binaries (requires CGo)
         run: make dist-darwin
+      - name: Ad-hoc sign macOS binaries
+        run: |
+          for f in dist/pixu-darwin-*; do
+            codesign --force --timestamp=none --sign - "$f"
+            codesign --verify "$f"
+          done
       - uses: actions/upload-artifact@v7
         with:
           name: pixu-darwin
