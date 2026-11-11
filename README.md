@@ -47,6 +47,10 @@ brew install pixu
 The formula lives in the `xvoland/homebrew-pixu` tap. The first install may
 prompt you to trust the tap; answer yes or run `brew trust xvoland/pixu` first.
 
+On macOS the installed binary is ad-hoc signed and any quarantine attribute is
+stripped automatically, so you no longer need to run
+`xattr -dr com.apple.quarantine` manually.
+
 ### From Source
 
 ```bash

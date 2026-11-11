@@ -121,6 +121,9 @@ make dist-darwin        # darwin/amd64 + darwin/arm64 (needs macOS + CGo)
 - Install: `brew tap xvoland/pixu && brew install pixu`.
 - The formula is rewritten by CI on each release tag; only hand-edit it for
   emergencies.
+- On macOS the formula ad-hoc signs the binary (`codesign --sign -`) and strips
+  `com.apple.quarantine`, so users no longer need `xattr -dr ...`. CI also
+  ad-hoc signs the darwin release binaries.
 
 ## CI
 
