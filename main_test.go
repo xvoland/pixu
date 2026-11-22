@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"image"
+	"image/color"
 	"math"
 	"os"
 	"strings"
@@ -177,8 +179,8 @@ func TestEnvPrecedence(t *testing.T) {
 	}
 	cases := []struct {
 		name, envKey, envVal, args string
-		get  func() interface{}
-		want interface{}
+		get                        func() interface{}
+		want                       interface{}
 	}{
 		{"width-flag-wins", "PIXU_WIDTH", "111", "-w 999", func() interface{} { return width }, 999},
 		{"width-env-only", "PIXU_WIDTH", "222", "", func() interface{} { return width }, 222},
@@ -258,10 +260,10 @@ func TestFitToTerminal(t *testing.T) {
 			}
 		}
 	}
-	checkText("H", 200, 200)  // square: fills height
-	checkText("W", 200, 200)  // square: fills width
-	checkText("H", 300, 100)  // wide: fills height, width overflows (ok)
-	checkText("W", 100, 300)  // tall: fills width, height overflows (ok)
+	checkText("H", 200, 200) // square: fills height
+	checkText("W", 200, 200) // square: fills width
+	checkText("H", 300, 100) // wide: fills height, width overflows (ok)
+	checkText("W", 100, 300) // tall: fills width, height overflows (ok)
 
 	// TGP/sixel are pixel dimensions: aspect must equal imgW/imgH, and the
 	// chosen axis must fill the terminal.
@@ -301,6 +303,145 @@ func TestParseFit(t *testing.T) {
 	for _, c := range cases {
 		if axis := parseFit(c.in); axis != c.wantAxis {
 			t.Errorf("parseFit(%q) = %q, want %q", c.in, axis, c.wantAxis)
+		}
+	}
+}
+
+// TestValidateFlagsExitCode verifies that invalid flag values are usage errors
+// (exit code 2) rather than generic runtime failures.
+func TestValidateFlagsExitCode(t *testing.T) {
+	oldMode, oldRotate, oldWidth, oldHeight, oldScale := mode, rotate, width, height, scale
+	defer func() { mode, rotate, width, height, scale = oldMode, oldRotate, oldWidth, oldHeight, oldScale }()
+
+	reset := func() {
+		mode, rotate, width, height, scale = "rgb", 0, 0, 0, 1.0
+	}
+
+	cases := []struct {
+		name   string
+		mutate func()
+	}{
+		{"mode", func() { mode = "bogus" }},
+		{"rotate", func() { rotate = 45 }},
+		{"width", func() { width = -1 }},
+		{"scale", func() { scale = 0 }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reset()
+			tc.mutate()
+			err := validateFlags()
+			if err == nil {
+				t.Fatal("validateFlags() returned nil for invalid value")
+			}
+			var ee *exitError
+			if !errors.As(err, &ee) || ee.code != exitUsage {
+				t.Errorf("expected usage exit code %d, got %T/%v", exitUsage, err, err)
+			}
+		})
+	}
+}
+
+// TestLoadImageReturnsError verifies that filesystem failures are returned to
+// Cobra (and printed on stderr by main) instead of terminating the process.
+func TestLoadImageReturnsError(t *testing.T) {
+	oldInput, oldPaste := input, paste
+	defer func() { input, paste = oldInput, oldPaste }()
+	input = "/nonexistent/pixu-test-image.png"
+	paste = false
+
+	if _, err := loadImage(nil); err == nil {
+		t.Fatal("loadImage() should return an error for a missing file")
+	}
+}
+
+// referenceFloydSteinberg is a slow, straightforward implementation used only
+// as an oracle: it goes through image.At and calls quantize directly, so it
+// stays independent of the production fast path (direct pixel access and the
+// precomputed quantization table).
+func referenceFloydSteinberg(src image.Image) image.Image {
+	b := src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	dst := image.NewNRGBA(b)
+	const levels = 6
+	span := w + 2
+	cur := make([]float64, 3*span)
+	next := make([]float64, 3*span)
+
+	clamp := func(v float64) float64 {
+		if v > 255 {
+			return 255
+		}
+		if v < 0 {
+			return 0
+		}
+		return v
+	}
+
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			r32, g32, b32, _ := src.At(b.Min.X+x, b.Min.Y+y).RGBA()
+			r := clamp(float64(r32>>8) + cur[x])
+			g := clamp(float64(g32>>8) + cur[span+x])
+			bl := clamp(float64(b32>>8) + cur[2*span+x])
+
+			nr, ng, nb := quantize(r, levels), quantize(g, levels), quantize(bl, levels)
+			dst.SetNRGBA(b.Min.X+x, b.Min.Y+y, color.NRGBA{
+				R: uint8(nr), G: uint8(ng), B: uint8(nb), A: 255,
+			})
+
+			dr, dg, db := r-nr, g-ng, bl-nb
+			cur[x+1] += dr * 7 / 16
+			cur[span+x+1] += dg * 7 / 16
+			cur[2*span+x+1] += db * 7 / 16
+			if x > 0 {
+				next[x-1] += dr * 3 / 16
+				next[span+x-1] += dg * 3 / 16
+				next[2*span+x-1] += db * 3 / 16
+			}
+			next[x] += dr * 5 / 16
+			next[span+x] += dg * 5 / 16
+			next[2*span+x] += db * 5 / 16
+			if x+1 < w {
+				next[x+1] += dr / 16
+				next[span+x+1] += dg / 16
+				next[2*span+x+1] += db / 16
+			}
+		}
+		cur, next = next, cur
+		for i := range next {
+			next[i] = 0
+		}
+	}
+	return dst
+}
+
+// TestFloydSteinbergMatchesReference guards the LUT fast path against any
+// behavioural drift: output must be byte-for-byte identical to the float path.
+func TestFloydSteinbergMatchesReference(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 37, 23))
+	for y := 0; y < 23; y++ {
+		for x := 0; x < 37; x++ {
+			src.Set(x, y, color.RGBA{
+				R: uint8(x*11 + y*3),
+				G: uint8(y*17 + x*5),
+				B: uint8(x*y + 7),
+				A: 255,
+			})
+		}
+	}
+
+	got := applyFloydSteinberg(src)
+	want := referenceFloydSteinberg(src)
+	b := src.Bounds()
+	if got.Bounds() != b {
+		t.Fatalf("bounds = %v, want %v", got.Bounds(), b)
+	}
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			if g, w := got.At(x, y), want.At(x, y); g != w {
+				t.Fatalf("pixel (%d,%d) = %v, want %v", x, y, g, w)
+			}
 		}
 	}
 }

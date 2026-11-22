@@ -27,8 +27,7 @@ func BenchmarkRenderTerminalRGB(b *testing.B) {
 	src := benchImage()
 	r := &ImageRenderer{width: 100, height: 40, mode: "rgb"}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = r.renderTerminal(src)
 	}
 }
@@ -37,8 +36,7 @@ func BenchmarkRenderTerminal256(b *testing.B) {
 	src := benchImage()
 	r := &ImageRenderer{width: 100, height: 40, mode: "256"}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = r.renderTerminal(src)
 	}
 }
@@ -47,8 +45,16 @@ func BenchmarkRenderTerminalASCII(b *testing.B) {
 	src := benchImage()
 	r := &ImageRenderer{width: 100, height: 40, mode: "ascii", asciiChars: "@#%*+=-:. "}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
+		_ = r.renderTerminal(src)
+	}
+}
+
+func BenchmarkRenderTerminalGrayscale(b *testing.B) {
+	src := benchImage()
+	r := &ImageRenderer{width: 100, height: 40, mode: "grayscale"}
+	b.ReportAllocs()
+	for b.Loop() {
 		_ = r.renderTerminal(src)
 	}
 }
@@ -56,16 +62,26 @@ func BenchmarkRenderTerminalASCII(b *testing.B) {
 func BenchmarkFloydSteinberg(b *testing.B) {
 	src := benchImage()
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = applyFloydSteinberg(src)
 	}
 }
 
 func BenchmarkRgbTo256(b *testing.B) {
+	i := 0
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = rgbTo256(uint8(i%256), uint8((i*3)%256), uint8((i*7)%256))
+	for b.Loop() {
+		_ = rgbTo256(uint8(i), uint8(i*3), uint8(i*7))
+		i++
+	}
+}
+
+// BenchmarkPrepareImage measures the resize path used by the TGP and Sixel
+// protocols: rotate/invert an image and resample it with Lanczos.
+func BenchmarkPrepareImage(b *testing.B) {
+	src := benchImage()
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = prepareImage(src, 800, 600, 90, false)
 	}
 }

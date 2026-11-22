@@ -21,7 +21,7 @@ func fatalClipboardInit(err error) {
 	if runtime.GOOS == "linux" && os.Getenv("WAYLAND_DISPLAY") != "" {
 		msg += " (native Wayland detected; the Linux clipboard backend requires X11/XWayland)"
 	}
-	log.Fatalf(msg)
+	log.Fatal(msg)
 }
 
 func clipboardReadImage() []byte {

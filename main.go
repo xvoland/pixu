@@ -20,8 +20,10 @@ package main
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -33,10 +35,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/disintegration/imaging"
@@ -48,6 +53,28 @@ import (
 )
 
 const defaultVersion = "x.x.x"
+
+// Exit codes follow the Unix convention: 1 for runtime failures, 2 for usage
+// errors (bad flags or invalid flag values).
+const (
+	exitRuntime = 1
+	exitUsage   = 2
+)
+
+// exitError carries the process exit code alongside an error. Commands return
+// it from RunE; main() unwraps it after Execute() so flag parsing errors and
+// validation failures exit with code 2 while runtime failures exit with 1.
+type exitError struct {
+	code int
+	err  error
+}
+
+func (e *exitError) Error() string { return e.err.Error() }
+func (e *exitError) Unwrap() error { return e.err }
+
+func usageErrorf(format string, args ...any) error {
+	return &exitError{code: exitUsage, err: fmt.Errorf(format, args...)}
+}
 
 // versionLine returns the version string for display. The build source is shown
 // in parentheses only when it differs from the version (e.g. a dev or dirty
@@ -190,6 +217,20 @@ func quantize(val float64, levels int) float64 {
 	return math.Round(val/step) * step
 }
 
+// quantize6LUT precomputes the 6-level quantization for all 8-bit inputs. The
+// step is 51 (odd), so round(x/51)*51 is exactly equal to LUT[round(x)] for
+// x in [0,255]. The dithering hot path can therefore replace three float
+// divisions and three math.Round calls per pixel with three table lookups
+// without changing a single output byte (guarded by
+// TestFloydSteinbergMatchesReference).
+var quantize6LUT = func() [256]float64 {
+	var lut [256]float64
+	for i := range lut {
+		lut[i] = quantize(float64(i), 6)
+	}
+	return lut
+}()
+
 // applyFloydSteinberg applies Floyd-Steinberg error diffusion dithering. The
 // image is quantized to 6 levels per channel so the result matches the 6x6x6
 // 256-color cube used by the "256" terminal mode. Per-row error buffers
@@ -198,9 +239,6 @@ func quantize(val float64, levels int) float64 {
 func applyFloydSteinberg(img image.Image) image.Image {
 	bounds := img.Bounds()
 	w, h := bounds.Dx(), bounds.Dy()
-
-	// quantize to 6 levels per channel (matches 256-color cube)
-	const levels = 6
 
 	// Read the source pixels directly when the concrete type is known, to avoid
 	// the per-pixel interface dispatch of img.At.
@@ -253,9 +291,10 @@ func applyFloydSteinberg(img image.Image) image.Image {
 				oldB = 0
 			}
 
-			newR := quantize(oldR, levels)
-			newG := quantize(oldG, levels)
-			newB := quantize(oldB, levels)
+			// oldR/G/B were clamped to [0,255] above, so the index is in range.
+			newR := quantize6LUT[int(oldR+0.5)]
+			newG := quantize6LUT[int(oldG+0.5)]
+			newB := quantize6LUT[int(oldB+0.5)]
 
 			i := rowBase + x*4
 			newImg.Pix[i] = uint8(newR)
@@ -514,7 +553,7 @@ const chunkSize = 4096
 // prepareImage applies rotation, inversion and resizing, returning the image
 // ready for protocol-specific encoding. When width or height is <= 0 the image
 // is only rotated/inverted (no resize).
-func prepareImage(img image.Image, width, height, rotate int, invert bool) image.Image {
+func prepareImage(img image.Image, width, height, rotate int, invert bool) (image.Image, error) {
 	img = rotateImage(img, rotate)
 	if invert {
 		img = imaging.Invert(img)
@@ -522,22 +561,25 @@ func prepareImage(img image.Image, width, height, rotate int, invert bool) image
 	if width > 0 && height > 0 {
 		resized := imaging.Resize(img, width, height, imaging.Lanczos)
 		if resized == nil {
-			log.Fatalf("Failed to resize image: result is nil")
+			return nil, fmt.Errorf("Failed to resize image: result is nil")
 		}
-		return resized
+		return resized, nil
 	}
-	return img
+	return img, nil
 }
 
-func printTGP(img image.Image, width, height int, rotate int, invert bool) {
+func printTGP(w io.Writer, img image.Image, width, height int, rotate int, invert bool) error {
 	term := os.Getenv("TERM_PROGRAM")
 
-	resized := prepareImage(img, width, height, rotate, invert)
+	resized, err := prepareImage(img, width, height, rotate, invert)
+	if err != nil {
+		return err
+	}
 
 	// Encode the resized image into PNG format
 	buf := new(bytes.Buffer)
 	if err := png.Encode(buf, resized); err != nil {
-		log.Fatalf("Failed to encode image: %v", err)
+		return fmt.Errorf("Failed to encode image: %v", err)
 	}
 
 	// Convert PNG bytes to base64 for terminal protocols
@@ -545,15 +587,16 @@ func printTGP(img image.Image, width, height int, rotate int, invert bool) {
 
 	switch term {
 	case "iTerm.app":
-		fmt.Printf("\033]1337;File=name=inline.png;width=auto;height=auto;inline=1:%s\a\n", data)
+		fmt.Fprintf(w, "\033]1337;File=name=inline.png;width=auto;height=auto;inline=1:%s\a\n", data)
 	case "Ghostty", "WezTerm":
-		printTGPKitty(data)
+		printTGPKitty(w, data)
 	default:
-		printTGPKitty(data)
+		printTGPKitty(w, data)
 	}
+	return nil
 }
 
-func printTGPKitty(data string) {
+func printTGPKitty(w io.Writer, data string) {
 	for i := 0; i < len(data); i += chunkSize {
 		end := i + chunkSize
 		if end > len(data) {
@@ -567,29 +610,33 @@ func printTGPKitty(data string) {
 		}
 
 		if i == 0 {
-			fmt.Printf("\033_Ga=T,f=100,t=d,m=%d;%s\033\\", more, chunk)
+			fmt.Fprintf(w, "\033_Ga=T,f=100,t=d,m=%d;%s\033\\", more, chunk)
 		} else {
-			fmt.Printf("\033_Gm=%d;%s\033\\", more, chunk)
+			fmt.Fprintf(w, "\033_Gm=%d;%s\033\\", more, chunk)
 		}
 	}
-	fmt.Print("\n")
+	fmt.Fprint(w, "\n")
 }
 
 // printSixel renders the image through the Sixel graphics protocol, which is
 // supported by xterm, mlterm, WezTerm and Ghostty. It requires a Sixel-capable
 // terminal; see sixelSupported for the guard used by callers.
-func printSixel(img image.Image, width, height int, rotate int, invert bool) {
-	resized := prepareImage(img, width, height, rotate, invert)
+func printSixel(w io.Writer, img image.Image, width, height int, rotate int, invert bool) error {
+	resized, err := prepareImage(img, width, height, rotate, invert)
+	if err != nil {
+		return err
+	}
 
-	enc := sixel.NewEncoder(os.Stdout)
+	enc := sixel.NewEncoder(w)
 	enc.Width = width
 	enc.Height = height
 	enc.Dither = dither
 	enc.Colors = 256
 
 	if err := enc.Encode(resized); err != nil {
-		log.Fatalf("Failed to encode sixel: %v", err)
+		return fmt.Errorf("Failed to encode sixel: %v", err)
 	}
+	return nil
 }
 
 // renderTerminal converts the image into a slice of ANSI escape-coded strings,
@@ -632,12 +679,24 @@ func (r *ImageRenderer) renderTerminal(img image.Image) []string {
 		asciiRunes = []rune(chars)
 	}
 
+	// Pre-size each row to the actual worst-case width of the selected mode.
+	// The old fixed dx*30 estimate was too small for RGB/grayscale (~40 bytes
+	// per cell) and too large for 256-color (~23) and ASCII (one rune), causing
+	// avoidable Builder regrowth or over-allocation.
+	bytesPerCell := 42
+	switch r.mode {
+	case "256":
+		bytesPerCell = 24
+	case "ascii":
+		bytesPerCell = 8
+	}
+
 	// buf is reused for integer-to-ASCII conversion of escape-sequence numbers;
 	// strings.Builder copies the bytes on Write, so the buffer is safe to reuse.
 	var buf [16]byte
 	for y := minY; y < minY+dy; y += 2 {
 		var sb strings.Builder
-		sb.Grow(dx * 30)
+		sb.Grow(dx*bytesPerCell + 4)
 		rowBelow := y + 1
 		for x := minX; x < minX+dx; x++ {
 			var tr8, tg8, tb8, br8, bg8, bb8 uint8
@@ -837,7 +896,7 @@ func applyEnvDefaults(cmd *cobra.Command) {
 	}
 }
 
-func runInteractiveMode(args []string, mode string, invert bool, rotate int, char string, width int, height int, dither bool, asciiChars string) {
+func runInteractiveMode(args []string, mode string, invert bool, rotate int, char string, width int, height int, dither bool, asciiChars string) error {
 	imageExtensions := map[string]bool{
 		".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".bmp": true, ".webp": true,
 	}
@@ -848,8 +907,7 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 			dirPath := files[0]
 			entries, err := os.ReadDir(dirPath)
 			if err != nil {
-				fmt.Printf("Error reading directory: %v\n", err)
-				return
+				return fmt.Errorf("reading directory: %v", err)
 			}
 			files = nil
 			for _, e := range entries {
@@ -865,7 +923,7 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 
 	if len(files) == 0 {
 		fmt.Println("No images found")
-		return
+		return nil
 	}
 
 	currentIndex := 0
@@ -903,7 +961,7 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 				fmt.Printf("Error encoding image: %v\n", err)
 				return
 			}
-			printTGPKitty(base64.StdEncoding.EncodeToString(buf.Bytes()))
+			printTGPKitty(os.Stdout, base64.StdEncoding.EncodeToString(buf.Bytes()))
 
 			_, cellH := getCellSize()
 			termRowH := displayH/cellH + 3
@@ -1015,29 +1073,63 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 	}
 	tty, err := os.Open(ttyPath)
 	if err != nil {
-		fmt.Println("Error: cannot open terminal for input")
-		return
+		return fmt.Errorf("cannot open terminal for input")
 	}
 	defer tty.Close()
 
 	oldState, err := term.MakeRaw(int(tty.Fd()))
 	if err != nil {
-		fmt.Println("Error: cannot set raw mode")
-		return
+		return fmt.Errorf("cannot set raw mode")
 	}
-	defer term.Restore(int(tty.Fd()), oldState)
+
+	// A signal (e.g. SIGTERM) bypasses deferred cleanup. Watch for it and put
+	// the terminal back in cooked mode before exiting. Terminal input lives in
+	// its own goroutine so the main loop can react to the signal without relying
+	// on close() to interrupt a blocked Read (not reliable on every platform).
+	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	var restoreOnce sync.Once
+	restore := func() {
+		restoreOnce.Do(func() {
+			_ = term.Restore(int(tty.Fd()), oldState)
+			fmt.Print("\033[2J\033[H")
+		})
+	}
+	defer restore()
+
+	type keyEvent struct {
+		buf [10]byte
+		n   int
+	}
+	keys := make(chan keyEvent, 1)
+	go func() {
+		for {
+			var ev keyEvent
+			n, err := tty.Read(ev.buf[:])
+			if err != nil || n == 0 {
+				return
+			}
+			ev.n = n
+			keys <- ev
+		}
+	}()
 
 	for {
-		buf := make([]byte, 10)
-		n, err := tty.Read(buf)
-		if err != nil || n == 0 {
-			continue
+		var ev keyEvent
+		select {
+		case <-sigCtx.Done():
+			restore()
+			return nil
+		case ev = <-keys:
 		}
 
+		n := ev.n
+		buf := ev.buf[:n]
 		if buf[0] == 27 {
 			if n == 1 {
 				fmt.Print("\033[2J\033[H")
-				return
+				return nil
 			}
 			if n >= 3 && buf[1] == 91 {
 				switch buf[2] {
@@ -1058,13 +1150,13 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 
 		if buf[0] == 3 {
 			fmt.Print("\033[2J\033[H")
-			return
+			return nil
 		}
 
 		switch buf[0] {
 		case 'q', 'Q':
 			fmt.Print("\033[2J\033[H")
-			return
+			return nil
 		case 'n', 'N', 14:
 			if currentIndex < len(files)-1 {
 				currentIndex++
@@ -1079,18 +1171,17 @@ func runInteractiveMode(args []string, mode string, invert bool, rotate int, cha
 	}
 }
 
-func showQRCode() {
+func showQRCode() error {
 	if len(qrCodeData) == 0 {
 		fmt.Println("QR code is not available in this build.")
 		fmt.Println("To support PIXU, visit: https://paypal.me/xvoland")
 		printCopyleft()
-		return
+		return nil
 	}
 
 	img, err := imaging.Decode(bytes.NewReader(qrCodeData), imaging.AutoOrientation(true))
 	if err != nil {
-		fmt.Println("Error decoding QR:", err)
-		return
+		return fmt.Errorf("Error decoding QR: %v", err)
 	}
 
 	bounds := img.Bounds()
@@ -1105,22 +1196,23 @@ func showQRCode() {
 	case "iTerm.app":
 		buf := new(bytes.Buffer)
 		if err := png.Encode(buf, resized); err != nil {
-			log.Fatalf("Failed to encode QR image: %v", err)
+			return fmt.Errorf("Failed to encode QR image: %v", err)
 		}
 		encodedData := base64.StdEncoding.EncodeToString(buf.Bytes())
 		fmt.Printf("\033]1337;File=name=qr.png;width=auto;height=auto;inline=1:%s\a\n", encodedData)
 	default:
 		buf := new(bytes.Buffer)
 		if err := png.Encode(buf, resized); err != nil {
-			log.Fatalf("Failed to encode QR image: %v", err)
+			return fmt.Errorf("Failed to encode QR image: %v", err)
 		}
-		printTGPKitty(base64.StdEncoding.EncodeToString(buf.Bytes()))
+		printTGPKitty(os.Stdout, base64.StdEncoding.EncodeToString(buf.Bytes()))
 	}
 
 	if qrCodeText != "" {
 		fmt.Println()
 		fmt.Println(qrCodeText)
 	}
+	return nil
 }
 
 func pathExists(path string) (bool, error) {
@@ -1134,32 +1226,34 @@ func pathExists(path string) (bool, error) {
 	return false, err
 }
 
-// validateFlags checks all flag values are valid
-func validateFlags() {
+// validateFlags checks all flag values are valid. Failures are usage errors
+// and are reported with exit code 2 by main().
+func validateFlags() error {
 	validModes := map[string]bool{"rgb": true, "grayscale": true, "256": true, "ascii": true, "tgp": true, "sixel": true, "auto": true}
 	if !validModes[mode] {
-		log.Fatalf("Invalid mode: %q (must be rgb, grayscale, 256, ascii, tgp, sixel, or auto)", mode)
+		return usageErrorf("Invalid mode: %q (must be rgb, grayscale, 256, ascii, tgp, sixel, or auto)", mode)
 	}
 	mode = resolveMode(mode)
 
 	if !isValidRotate(rotate) {
-		log.Fatalf("Invalid rotate value: %d (must be 0, 90, 180, 270, or 360)", rotate)
+		return usageErrorf("Invalid rotate value: %d (must be 0, 90, 180, 270, or 360)", rotate)
 	}
 
 	if width < 0 || height < 0 {
-		log.Fatalf("Invalid width or height: width=%d height=%d (must be >= 0)", width, height)
+		return usageErrorf("Invalid width or height: width=%d height=%d (must be >= 0)", width, height)
 	}
 	if width > maxWidth || height > maxHeight {
-		log.Fatalf("Width or height too large: width=%d height=%d (max %d)", width, height, maxWidth)
+		return usageErrorf("Width or height too large: width=%d height=%d (max %d)", width, height, maxWidth)
 	}
 
 	if scale <= 0 {
-		log.Fatalf("Invalid scale: %v (must be > 0)", scale)
+		return usageErrorf("Invalid scale: %v (must be > 0)", scale)
 	}
+	return nil
 }
 
 // loadImage loads image from clipboard, input, stdin, or file argument
-func loadImage(args []string) image.Image {
+func loadImage(args []string) (image.Image, error) {
 	var img image.Image
 	var err error
 
@@ -1169,14 +1263,14 @@ func loadImage(args []string) image.Image {
 		if len(clipData) > 0 {
 			img, err = imaging.Decode(bytes.NewReader(clipData), imaging.AutoOrientation(true))
 			if err == nil {
-				return img
+				return img, nil
 			}
 		}
 
 		// 2. Try text content (file path, URL, or base64)
 		clipText := strings.TrimSpace(clipboardReadText())
 		if clipText == "" {
-			log.Fatalf("Clipboard is empty")
+			return nil, fmt.Errorf("Clipboard is empty")
 		}
 
 		// 2a. File path
@@ -1187,7 +1281,7 @@ func loadImage(args []string) image.Image {
 				if imageExts[ext] {
 					img, err = imaging.Open(clipText, imaging.AutoOrientation(true))
 					if err == nil {
-						return img
+						return img, nil
 					}
 				}
 			}
@@ -1201,7 +1295,7 @@ func loadImage(args []string) image.Image {
 				if data, err := io.ReadAll(resp.Body); err == nil && len(data) > 0 {
 					img, err = imaging.Decode(bytes.NewReader(data), imaging.AutoOrientation(true))
 					if err == nil {
-						return img
+						return img, nil
 					}
 				}
 			}
@@ -1215,23 +1309,23 @@ func loadImage(args []string) image.Image {
 		if decoded, err := base64.StdEncoding.DecodeString(b64Data); err == nil && len(decoded) > 0 {
 			img, err = imaging.Decode(bytes.NewReader(decoded), imaging.AutoOrientation(true))
 			if err == nil {
-				return img
+				return img, nil
 			}
 		}
 		if decoded, err := base64.URLEncoding.DecodeString(b64Data); err == nil && len(decoded) > 0 {
 			img, err = imaging.Decode(bytes.NewReader(decoded), imaging.AutoOrientation(true))
 			if err == nil {
-				return img
+				return img, nil
 			}
 		}
 
 		// 2d. Try decoding raw text bytes as image
 		img, err = imaging.Decode(bytes.NewReader([]byte(clipText)), imaging.AutoOrientation(true))
 		if err == nil {
-			return img
+			return img, nil
 		}
 
-		log.Fatalf("Cannot decode image from clipboard content")
+		return nil, fmt.Errorf("Cannot decode image from clipboard content")
 	}
 
 	if input != "" {
@@ -1242,36 +1336,36 @@ func loadImage(args []string) image.Image {
 			data, err = os.ReadFile(input)
 		}
 		if err != nil {
-			log.Fatalf("Error reading input: %v", err)
+			return nil, fmt.Errorf("reading input: %v", err)
 		}
 		img, err = imaging.Decode(bytes.NewReader(data), imaging.AutoOrientation(true))
 		if err != nil {
-			log.Fatalf("Error decoding image: %v", err)
+			return nil, fmt.Errorf("decoding image: %v", err)
 		}
-		return img
+		return img, nil
 	}
 
 	if len(args) > 0 && args[0] == "-" {
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
-			log.Fatalf("Error reading stdin: %v", err)
+			return nil, fmt.Errorf("reading stdin: %v", err)
 		}
 		img, err = imaging.Decode(bytes.NewReader(data), imaging.AutoOrientation(true))
 		if err != nil {
-			log.Fatalf("Error decoding image from stdin: %v", err)
+			return nil, fmt.Errorf("decoding image from stdin: %v", err)
 		}
-		return img
+		return img, nil
 	}
 
 	if len(args) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	img, err = imaging.Open(args[0], imaging.AutoOrientation(true))
 	if err != nil {
-		log.Fatalf("Error loading image: %v", err)
+		return nil, fmt.Errorf("loading image: %v", err)
 	}
-	return img
+	return img, nil
 }
 
 // fitToTerminal computes the render width/height for --fit while preserving the
@@ -1338,7 +1432,19 @@ func parseFit(fit string) string {
 }
 
 // renderAndOutput renders the image and writes to output
-func renderAndOutput(img image.Image) {
+func renderAndOutput(img image.Image) error {
+	// Create the output writer once for every mode. --output must work for the
+	// graphics protocols too, not just for the text renderers.
+	var outputWriter io.Writer = os.Stdout
+	if output != "" {
+		f, err := os.Create(output)
+		if err != nil {
+			return fmt.Errorf("creating output file: %v", err)
+		}
+		defer f.Close()
+		outputWriter = f
+	}
+
 	// Determine the terminal size once and reuse it across the fit logic and the
 	// protocol-specific size calculations instead of querying it repeatedly.
 	termW, termH := getTerminalSize()
@@ -1366,16 +1472,14 @@ func renderAndOutput(img image.Image) {
 		}
 		outW, outH := calculateTGPSize(imgW, imgH, pxW, pxH, termW, termH, statusLinesTGP)
 		if mode == "tgp" {
-			printTGP(img, outW, outH, rotate, invert)
-			return
+			return printTGP(outputWriter, img, outW, outH, rotate, invert)
 		}
 		if !sixelSupported() {
-			log.Fatalf("Sixel is not supported by this terminal (%s). "+
+			return fmt.Errorf("Sixel is not supported by this terminal (%s). "+
 				"Use a Sixel-capable terminal (xterm, mlterm, WezTerm, Ghostty) "+
 				"or switch to --mode tgp for iTerm2/Kitty support.", os.Getenv("TERM_PROGRAM"))
 		}
-		printSixel(img, outW, outH, rotate, invert)
-		return
+		return printSixel(outputWriter, img, outW, outH, rotate, invert)
 	}
 
 	scaleWidth, scaleHeight := calculateSize(img, width, height, false)
@@ -1391,16 +1495,6 @@ func renderAndOutput(img image.Image) {
 		dither:     dither,
 	}
 
-	var outputWriter io.Writer = os.Stdout
-	if output != "" {
-		f, err := os.Create(output)
-		if err != nil {
-			log.Fatalf("Error creating output file: %v", err)
-		}
-		defer f.Close()
-		outputWriter = f
-	}
-
 	// Buffer every rendered line and issue a single write instead of one
 	// fmt.Fprintln per line, cutting the number of syscalls on the output path.
 	var buf bytes.Buffer
@@ -1409,8 +1503,9 @@ func renderAndOutput(img image.Image) {
 		buf.WriteByte('\n')
 	}
 	if _, err := outputWriter.Write(buf.Bytes()); err != nil {
-		log.Fatalf("Error writing output: %v", err)
+		return fmt.Errorf("writing output: %v", err)
 	}
+	return nil
 }
 
 // numericValue is a pflag.Value for numeric flags (int or float) that reports a
@@ -1467,14 +1562,18 @@ func main() {
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			applyEnvDefaults(cmd)
 		},
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			// pflag's NoOptDefVal makes --fit's value optional; when given as
 			// --fit W (space) it leaves "W" as a stray positional instead of
 			// consuming it as the value. Recover the axis from that token so both
 			// --fit W and --fit=W work, while bare --fit still means by-height.
+			// A real file named W/H is left alone so it can still be opened.
 			if cmd.Flags().Changed("fit") && fit == "H" {
 				for i, a := range args {
 					if a == "W" || a == "H" {
+						if exists, _ := pathExists(a); exists {
+							continue
+						}
 						fit = a
 						args = append(args[:i], args[i+1:]...)
 						break
@@ -1484,31 +1583,38 @@ func main() {
 
 			if showVersion {
 				printInfo()
-				return
+				return nil
 			}
 
-			validateFlags()
+			if err := validateFlags(); err != nil {
+				return err
+			}
 
 			if qr {
-				showQRCode()
-				return
+				return showQRCode()
 			}
 
 			if interactive {
-				runInteractiveMode(args, mode, invert, rotate, char, width, height, dither, asciiChars)
-				return
+				return runInteractiveMode(args, mode, invert, rotate, char, width, height, dither, asciiChars)
 			}
 
-			img := loadImage(args)
+			img, err := loadImage(args)
+			if err != nil {
+				return err
+			}
 			if img == nil {
 				printInfo()
-				cmd.Help()
-				return
+				return cmd.Help()
 			}
 
-			renderAndOutput(img)
+			return renderAndOutput(img)
 		},
 	}
+
+	// Flag parse errors are usage errors (exit code 2), not runtime failures.
+	rootCmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+		return &exitError{code: exitUsage, err: err}
+	})
 
 	// Disable built-in help command
 	rootCmd.SetHelpCommand(&cobra.Command{Hidden: true})
@@ -1552,6 +1658,12 @@ func main() {
 			msg = msg[i+len("flag: "):]
 		}
 		fmt.Fprintf(os.Stderr, "Error: %s\n", msg)
-		os.Exit(1)
+
+		code := exitRuntime
+		var ee *exitError
+		if errors.As(err, &ee) {
+			code = ee.code
+		}
+		os.Exit(code)
 	}
 }
